@@ -1,0 +1,37 @@
+{
+  "cooldown_seconds": 60,
+  "dedup_window_seconds": 300,
+  "escalation_unacked_minutes": 15,
+  "routes": {
+    "info": [
+      "email"
+    ],
+    "warning": [
+      "email",
+      "webhook"
+    ],
+    "critical": [
+      "email",
+      "webhook",
+      "pagerduty"
+    ]
+  },
+  "channels": {
+    "email": {
+      "enabled": true
+    },
+    "slack": {
+      "enabled": false,
+      "webhook_url": ""
+    },
+    "webhook": {
+      "enabled": false,
+      "url": ""
+    },
+    "pagerduty": {
+      "enabled": false,
+      "events_api_url": "https://events.pagerduty.com/v2/enqueue",
+      "routing_key": ""
+    }
+  }
+}

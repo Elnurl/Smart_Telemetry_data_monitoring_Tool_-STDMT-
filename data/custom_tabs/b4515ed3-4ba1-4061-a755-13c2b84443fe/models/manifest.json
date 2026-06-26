@@ -1,0 +1,17 @@
+{
+  "62d66170-db26-4796-90eb-48a4473dfe57": {
+    "model_type": "Isolation Forest",
+    "filepath": "data/custom_tabs\\b4515ed3-4ba1-4061-a755-13c2b84443fe\\models\\62d66170-db26-4796-90eb-48a4473dfe57.pkl",
+    "saved_at": "2026-06-21T21:19:45.457512"
+  },
+  "f36fd106-dccd-49fd-9aa6-823c34553dc2": {
+    "model_type": "Autoencoder",
+    "filepath": "data/custom_tabs\\b4515ed3-4ba1-4061-a755-13c2b84443fe\\models\\f36fd106-dccd-49fd-9aa6-823c34553dc2.pkl",
+    "saved_at": "2026-06-21T21:19:47.662541"
+  },
+  "7f732799-f302-475f-a015-a55b969b1bba": {
+    "model_type": "Weibull RUL",
+    "filepath": "data/custom_tabs\\b4515ed3-4ba1-4061-a755-13c2b84443fe\\models\\7f732799-f302-475f-a015-a55b969b1bba.pkl",
+    "saved_at": "2026-06-21T21:20:06.442597"
+  }
+}

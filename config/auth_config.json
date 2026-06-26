@@ -1,0 +1,21 @@
+{
+  "provider": "local",
+  "oidc": {
+    "enabled": false,
+    "issuer": "",
+    "token_endpoint": "",
+    "userinfo_endpoint": "",
+    "client_id": "",
+    "client_secret": "",
+    "scope": "openid profile email",
+    "username_claim": "preferred_username",
+    "email_claim": "email",
+    "role_claim": "roles",
+    "role_mapping": {
+      "admin": "admin",
+      "analyst": "analyst",
+      "viewer": "viewer"
+    },
+    "default_role": "viewer"
+  }
+}

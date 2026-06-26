@@ -1,0 +1,39 @@
+{
+  "timestamp_utc": "2026-04-27T06:54:54Z",
+  "targets": {
+    "alert_latency_p95_ms": 250.0,
+    "ingestion_success_rate_pct": 99.5,
+    "false_positive_rate_pct": 2.0
+  },
+  "measurements": {
+    "ingestion": {
+      "runs": 300,
+      "success_rate_pct": 100.0,
+      "latency_avg_ms": 1.14,
+      "latency_p95_ms": 1.499
+    },
+    "alerting": {
+      "runs": 300,
+      "latency_avg_ms": 6.494,
+      "latency_p95_ms": 7.888
+    },
+    "false_positive": {
+      "samples": 500,
+      "false_positive_rate_pct": 0.0,
+      "threshold_reference": 0.5
+    },
+    "failure_injection": {
+      "missing_file_ingest_returns_false": true,
+      "route_failure_handled": true
+    }
+  },
+  "pass_fail": {
+    "ingestion_success_rate": true,
+    "alert_latency_p95": true,
+    "false_positive_rate": true,
+    "failure_injection_missing_file": true,
+    "failure_injection_route_failure": true
+  },
+  "notes": [],
+  "overall_pass": true
+}

@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "smtp_server": "smtp.gmail.com",
+  "smtp_port": 587,
+  "use_tls": true,
+  "username": "your-name",
+  "password": "your-app-password",
+  "from_address": "your-email@gmail.com",
+  "recipients": ["alerts@example.com"],
+  "alert_min_severity": 1
+}

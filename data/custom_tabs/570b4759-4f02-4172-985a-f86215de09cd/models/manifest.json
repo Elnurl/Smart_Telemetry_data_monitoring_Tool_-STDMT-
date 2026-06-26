@@ -1,0 +1,12 @@
+{
+  "ec067e2d-6d69-4a13-ac7f-b05d27e0ee2e": {
+    "model_type": "ARIMA",
+    "filepath": "data/custom_tabs\\570b4759-4f02-4172-985a-f86215de09cd\\models\\ec067e2d-6d69-4a13-ac7f-b05d27e0ee2e.pkl",
+    "saved_at": "2026-06-22T10:53:36.094313"
+  },
+  "b90705aa-8325-4184-81f8-6ba8a01577dd": {
+    "model_type": "XGBoost",
+    "filepath": "data\\custom_tabs\\570b4759-4f02-4172-985a-f86215de09cd\\models\\b90705aa-8325-4184-81f8-6ba8a01577dd.pkl",
+    "saved_at": "2026-06-26T12:11:26.747492"
+  }
+}

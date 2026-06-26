@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime / secrets
+keys/*
+!keys/.gitkeep
+data/users.json
+data/email_config.json
+data/telemetry.db
+data/model_registry.sqlite
+config/email_config.json
+config/config/
+security.log
+logs/
+reports/auto/
+*.pkl
+*.keras
+
+# Copilot / wrong uploads
+STDMS/
+telemetry_monitor/
+
+# OS
+.DS_Store
+Thumbs.db
+.vscode/

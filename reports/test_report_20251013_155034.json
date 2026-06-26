@@ -1,0 +1,204 @@
+{
+  "timestamp": "2025-10-13T15:50:34.914146",
+  "summary": {
+    "total_tests": 32,
+    "passed": 30,
+    "failed": 2,
+    "warnings": 0,
+    "pass_rate": 93.75
+  },
+  "results": [
+    {
+      "test": "Import PyQt5",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.061138"
+    },
+    {
+      "test": "Import PyQt5",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.061138"
+    },
+    {
+      "test": "Import pandas",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.061138"
+    },
+    {
+      "test": "Import numpy",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.061138"
+    },
+    {
+      "test": "Import scikit-learn",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.425324"
+    },
+    {
+      "test": "Import matplotlib",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.492707"
+    },
+    {
+      "test": "Import seaborn",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.850878"
+    },
+    {
+      "test": "Import statsmodels",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.850878"
+    },
+    {
+      "test": "Import TensorFlow",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.850878"
+    },
+    {
+      "test": "Config: config/app_config.json",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.869741"
+    },
+    {
+      "test": "Config: config/email_config.json",
+      "status": "FAIL",
+      "message": "Invalid JSON: 'charmap' codec can't decode byte 0x8f in position 132: character maps to <undefined>",
+      "timestamp": "2025-10-13T15:50:30.883366"
+    },
+    {
+      "test": "Config: config/ip_access.json",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.890923"
+    },
+    {
+      "test": "Config: config/theme_settings.json",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.900174"
+    },
+    {
+      "test": "Config: config/alert_rules.yaml",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.903872"
+    },
+    {
+      "test": "Directory: data",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.904484"
+    },
+    {
+      "test": "Directory: data/incoming",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.904484"
+    },
+    {
+      "test": "Directory: data/incoming_processed",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.905464"
+    },
+    {
+      "test": "Directory: logs",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.905464"
+    },
+    {
+      "test": "Directory: models",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.905464"
+    },
+    {
+      "test": "Directory: reports",
+      "status": "PASS",
+      "message": "",
+      "timestamp": "2025-10-13T15:50:30.905464"
+    },
+    {
+      "test": "Generate test data",
+      "status": "PASS",
+      "message": "Created 1000 samples with 50 anomalies",
+      "timestamp": "2025-10-13T15:50:30.912769"
+    },
+    {
+      "test": "Data loading",
+      "status": "PASS",
+      "message": "Loaded 1000 records",
+      "timestamp": "2025-10-13T15:50:30.930919"
+    },
+    {
+      "test": "Data preprocessing",
+      "status": "PASS",
+      "message": "Scaled 2 features",
+      "timestamp": "2025-10-13T15:50:30.946434"
+    },
+    {
+      "test": "Isolation Forest",
+      "status": "PASS",
+      "message": "Detected 50 anomalies (5.00%)",
+      "timestamp": "2025-10-13T15:50:31.145516"
+    },
+    {
+      "test": "LSTM Autoencoder",
+      "status": "PASS",
+      "message": "Model trained successfully",
+      "timestamp": "2025-10-13T15:50:33.026820"
+    },
+    {
+      "test": "CNN Model",
+      "status": "PASS",
+      "message": "Model trained successfully",
+      "timestamp": "2025-10-13T15:50:34.713145"
+    },
+    {
+      "test": "Model save/load",
+      "status": "PASS",
+      "message": "Model serialization works correctly",
+      "timestamp": "2025-10-13T15:50:34.795213"
+    },
+    {
+      "test": "Email config",
+      "status": "FAIL",
+      "message": "'charmap' codec can't decode byte 0x8f in position 132: character maps to <undefined>",
+      "timestamp": "2025-10-13T15:50:34.795213"
+    },
+    {
+      "test": "Database: telemetry.db",
+      "status": "PASS",
+      "message": "6 tables found",
+      "timestamp": "2025-10-13T15:50:34.795213"
+    },
+    {
+      "test": "Database: model_registry.db",
+      "status": "PASS",
+      "message": "2 tables found",
+      "timestamp": "2025-10-13T15:50:34.810466"
+    },
+    {
+      "test": "Database: versioning.db",
+      "status": "PASS",
+      "message": "3 tables found",
+      "timestamp": "2025-10-13T15:50:34.812087"
+    },
+    {
+      "test": "Auto-trigger timing",
+      "status": "PASS",
+      "message": "Cache persists after delay",
+      "timestamp": "2025-10-13T15:50:34.914146"
+    }
+  ]
+}
