@@ -2,6 +2,10 @@
 
 PyQt desktop app: custom monitoring tabs, anomaly detection, fleet dashboard.
 
+## License
+
+MIT License — see [LICENSE](LICENSE).
+
 ## Run (Python 3.10 only)
 
 ```powershell
