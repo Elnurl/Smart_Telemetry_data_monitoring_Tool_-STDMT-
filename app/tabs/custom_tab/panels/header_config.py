@@ -24,9 +24,20 @@ def build_header_config_group(tab: CustomMonitoringTab, models_list: List[dict])
     tab.header_data_source_label = QLabel(tab.config.get("data_folder", "—"))
     tab.header_data_source_label.setWordWrap(True)
     tab.header_models_count_label = QLabel(str(len(models_list)))
+    current_mode = str(tab.config.get("current_mission_mode") or "nominal")
+    scale = 1.0
+    for mode in tab.config.get("mission_modes") or []:
+        if str(mode.get("name", "")).lower() == current_mode.lower():
+            try:
+                scale = float(mode.get("threshold_scale", 1.0))
+            except (TypeError, ValueError):
+                scale = 1.0
+            break
+    tab.header_mission_mode_label = QLabel(f"{current_mode} (×{scale:g})")
 
     header_layout.addRow("Tab:", tab.header_tab_label)
     header_layout.addRow("Subsystem:", tab.header_subsystem_label)
+    header_layout.addRow("Mission mode:", tab.header_mission_mode_label)
     header_layout.addRow("Schedule:", tab.header_schedule_label)
     header_layout.addRow("Input:", tab.header_input_label)
     header_layout.addRow("File type:", tab.header_file_type_label)

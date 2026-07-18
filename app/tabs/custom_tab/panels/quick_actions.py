@@ -11,6 +11,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from PyQt5.QtWidgets import (
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -37,11 +38,14 @@ def build_snapshot_group(tab: CustomMonitoringTab) -> QGroupBox:
     tab.snapshot_file_label = QLabel("—")
     tab.snapshot_watch_label = QLabel("Status: Inactive")
     tab.snapshot_obs_label = QLabel("OK")
+    tab.snapshot_mllm_label = QLabel("—")
+    tab.snapshot_mllm_label.setWordWrap(True)
     layout.addRow("Health:", tab.snapshot_health_label)
     layout.addRow("Fusion score:", tab.snapshot_fusion_label)
     layout.addRow("Last file:", tab.snapshot_file_label)
     layout.addRow("Watch status:", tab.snapshot_watch_label)
     layout.addRow("OBS limits:", tab.snapshot_obs_label)
+    layout.addRow("M-LLM logs:", tab.snapshot_mllm_label)
     group.setLayout(layout)
     return group
 
@@ -90,6 +94,25 @@ def build_monitoring_controls_group(tab: CustomMonitoringTab) -> QGroupBox:
     controls_layout.addStretch()
     controls_layout.addWidget(tab.delete_tab_btn)
     actions_layout.addLayout(controls_layout)
+
+    mode_row = QHBoxLayout()
+    mode_row.addWidget(QLabel("Mission mode:"))
+    tab.mission_mode_combo = QComboBox()
+    for mode in tab.config.get("mission_modes") or []:
+        name = str(mode.get("name") or "").strip()
+        if name:
+            tab.mission_mode_combo.addItem(name)
+    if tab.mission_mode_combo.count() == 0:
+        for name in ("nominal", "eclipse", "maneuver", "safe_mode"):
+            tab.mission_mode_combo.addItem(name)
+    current = str(tab.config.get("current_mission_mode") or "nominal")
+    idx = tab.mission_mode_combo.findText(current)
+    if idx >= 0:
+        tab.mission_mode_combo.setCurrentIndex(idx)
+    tab.mission_mode_combo.currentTextChanged.connect(tab._on_mission_mode_changed)
+    mode_row.addWidget(tab.mission_mode_combo)
+    mode_row.addStretch()
+    actions_layout.addLayout(mode_row)
 
     tab.status_label = QLabel("Status: Inactive")
     tab.status_label.setWordWrap(True)

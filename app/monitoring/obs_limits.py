@@ -22,13 +22,34 @@ _OBS_CONDITION_RE = re.compile(
 _RULE_CONFIG_CACHE: dict[str, dict[str, Any]] = {}
 
 
-def evaluate_obs_condition(value: float, condition: str) -> bool:
-    """Evaluate a safe OBS rule without arbitrary code execution."""
+def parse_obs_condition(condition: str) -> tuple[str, float] | None:
+    """Return (operator, threshold) for a safe OBS condition, else None."""
     match = _OBS_CONDITION_RE.match(str(condition).strip())
     if not match:
+        return None
+    return match.group(1), float(match.group(2))
+
+
+def evaluate_obs_condition(
+    value: float,
+    condition: str,
+    *,
+    threshold_scale: float = 1.0,
+) -> bool:
+    """Evaluate a safe OBS rule without arbitrary code execution.
+
+    ``threshold_scale`` widens (scale>1) or tightens (scale<1) inequality bounds
+    so mission modes like eclipse can suppress expected thermal swings.
+    """
+    parsed = parse_obs_condition(condition)
+    if not parsed:
         logger.warning("Rejected unsafe OBS condition: %r", condition)
         return False
-    operator, threshold_raw = match.group(1), float(match.group(2))
+    operator, threshold_raw = parsed
+    if threshold_scale and threshold_scale != 1.0:
+        from app.models.fsm import scale_bound
+
+        threshold_raw = scale_bound(threshold_raw, operator, float(threshold_scale))
     if operator == ">":
         return value > threshold_raw
     if operator == "<":
@@ -102,15 +123,35 @@ def evaluate_obs_limits(
     rules: list[dict[str, Any]] | None = None,
     *,
     rule_config_file: str | Path | None = None,
+    threshold_scale: float = 1.0,
+    mission_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Evaluate operational bounds rules against the latest telemetry row."""
+    """Evaluate operational bounds rules against the latest telemetry row.
+
+    When ``threshold_scale != 1``, values that breach the base limit but stay
+    inside the scaled limit are reported under ``mode_normal`` (not anomalies).
+    """
     if data is None or len(data) == 0:
-        return {"ok": True, "violations": []}
+        return {
+            "ok": True,
+            "violations": [],
+            "mode_normal": [],
+            "threshold_scale": float(threshold_scale or 1.0),
+            "mission_mode": mission_mode,
+        }
 
     if rules is None:
         rules = load_rule_config(rule_config_file).get("rules", [])
 
+    try:
+        scale = float(threshold_scale) if threshold_scale else 1.0
+    except (TypeError, ValueError):
+        scale = 1.0
+    if scale <= 0:
+        scale = 1.0
+
     violations: list[dict[str, Any]] = []
+    mode_normal: list[dict[str, Any]] = []
     latest = data.iloc[-1]
     for rule in rules or []:
         param = rule.get("parameter")
@@ -119,16 +160,29 @@ def evaluate_obs_limits(
             continue
         try:
             value = float(latest[param])
-            if evaluate_obs_condition(value, condition):
-                violations.append(
-                    {
-                        "name": rule.get("name", param),
-                        "parameter": param,
-                        "value": value,
-                        "condition": condition,
-                        "severity": rule.get("severity", 1),
-                    }
-                )
+            base_hit = evaluate_obs_condition(value, condition, threshold_scale=1.0)
+            scaled_hit = evaluate_obs_condition(value, condition, threshold_scale=scale)
+            entry = {
+                "name": rule.get("name", param),
+                "parameter": param,
+                "value": value,
+                "condition": condition,
+                "severity": rule.get("severity", 1),
+                "threshold_scale": scale,
+                "mission_mode": mission_mode,
+            }
+            if scaled_hit:
+                violations.append(entry)
+            elif base_hit and scale != 1.0:
+                entry = dict(entry)
+                entry["reason"] = "mode-normal"
+                mode_normal.append(entry)
         except Exception:
             continue
-    return {"ok": len(violations) == 0, "violations": violations}
+    return {
+        "ok": len(violations) == 0,
+        "violations": violations,
+        "mode_normal": mode_normal,
+        "threshold_scale": scale,
+        "mission_mode": mission_mode,
+    }

@@ -28,5 +28,7 @@ This package is the new modular home for the legacy single-file app.
 - Alerts policy module: `app/alerts/policy.py`
 - Auth providers module: `app/auth/providers.py`
 - Audit logging module: `app/storage/audit.py`
+- Instrumentation Agent (Phase 0–4): `app/agent/` — tool chain, propose drafts, local RAG (`app/agent/rag/`)
+
 - Package structure for all target modules
 

@@ -47,6 +47,42 @@ def test_mark_retrain_needed_resolves_fusion_model_by_name(tmp_path: Path):
     assert pending[0]["tab_id"] == "clock-tab"
 
 
+def test_draft_alerts_crud(tmp_path: Path):
+    registry = ModelRegistry(db_path=str(tmp_path / "drafts.sqlite"))
+    draft_id = registry.create_draft_alert(
+        tab_id="tab-a",
+        kind="alert",
+        agent_reasoning="drift rising",
+        proposed_message="Notify ops",
+        severity="CRITICAL",
+    )
+    assert draft_id > 0
+    pending = registry.get_pending_draft_alerts()
+    assert len(pending) == 1
+    assert pending[0]["severity"] == "CRITICAL"
+    assert registry.resolve_draft_alert(draft_id, "rejected", actioned_by="op")
+    assert registry.get_pending_draft_alerts() == []
+
+
+def test_draft_kinds_train_and_create_tab(tmp_path: Path):
+    registry = ModelRegistry(db_path=str(tmp_path / "kinds.sqlite"))
+    train_id = registry.create_draft_alert(
+        tab_id="t1",
+        kind="train",
+        proposed_message="Train RF",
+        proposed_payload={"model_id": "m1"},
+    )
+    tab_id = registry.create_draft_alert(
+        kind="create_tab",
+        proposed_message="New tab",
+        proposed_payload={"config": {"title": "X"}},
+    )
+    assert registry.get_draft_alert(train_id)["kind"] == "train"
+    assert registry.get_draft_alert(tab_id)["kind"] == "create_tab"
+    assert len(registry.get_pending_draft_alerts(kind="train")) == 1
+    assert len(registry.get_pending_draft_alerts(kind="create_tab")) == 1
+
+
 def test_format_registry_error_disk_full():
     exc = sqlite3.OperationalError("database or disk is full")
     message = format_registry_error(exc)

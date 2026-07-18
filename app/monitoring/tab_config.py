@@ -21,7 +21,9 @@ DEFAULT_MODELS = [
 
 
 def default_tab_config(title: str = "New Monitoring Tab") -> dict[str, Any]:
-    return {
+    from app.models.fsm import DEFAULT_MISSION_MODES, ensure_fsm_fields
+
+    cfg = {
         "title": title,
         "data_folder": "",
         "data_file_type": "CSV",
@@ -44,7 +46,10 @@ def default_tab_config(title: str = "New Monitoring Tab") -> dict[str, Any]:
         "mqtt_topic": "",
         "opcua_endpoint": "",
         "opcua_nodes": "",
+        "mission_modes": [dict(m) for m in DEFAULT_MISSION_MODES],
+        "current_mission_mode": "nominal",
     }
+    return ensure_fsm_fields(cfg)
 
 
 class TabConfigurationManager:

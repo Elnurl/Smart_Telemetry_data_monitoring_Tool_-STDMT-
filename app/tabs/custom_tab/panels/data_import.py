@@ -106,6 +106,49 @@ def build_data_import_panel(host: Any, parent_layout, *, slots: LegacyPanelSlots
     
     source_group.setLayout(source_layout)
     layout.addWidget(source_group)
+
+    # Mission / event logs (M-LLM input) — parallel to numeric CSV/JSON
+    log_group = QGroupBox("Mission / Event Logs")
+    log_layout = QVBoxLayout()
+    log_hint = QLabel(
+        "Optional .log / .txt event messages (GMSEC-style). "
+        "M-LLM analyzes them in the current mission-mode context."
+    )
+    log_hint.setWordWrap(True)
+    log_layout.addWidget(log_hint)
+    log_file_row = QHBoxLayout()
+    h.log_path_input = QLineEdit()
+    h.log_path_input.setReadOnly(True)
+    h.log_path_input.setPlaceholderText("No log file selected")
+    h.log_path_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    if getattr(h, "config", None) and h.config.get("log_file"):
+        h.log_path_input.setText(str(h.config.get("log_file")))
+    browse_log_btn = QPushButton("Browse…")
+    browse_log_btn.setMinimumWidth(80)
+    load_log_btn = QPushButton("Load Logs")
+    load_log_btn.setMinimumWidth(100)
+    if hasattr(h, "browse_log_file") and callable(getattr(type(h), "browse_log_file", None)):
+        browse_log_btn.clicked.connect(h.browse_log_file)
+        load_log_btn.clicked.connect(h.load_log_file)
+    else:
+        browse_log_btn.clicked.connect(slots.data_slot(h, "browse_log_file"))
+        load_log_btn.clicked.connect(slots.data_slot(h, "load_log_file"))
+    log_file_row.addWidget(QLabel("Log file:"))
+    log_file_row.addWidget(h.log_path_input, 1)
+    log_file_row.addWidget(browse_log_btn)
+    log_file_row.addWidget(load_log_btn)
+    log_layout.addLayout(log_file_row)
+    h.log_preview_table = QTableWidget(0, 4)
+    h.log_preview_table.setHorizontalHeaderLabels(["Time", "Level", "Source", "Message"])
+    h.log_preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+    h.log_preview_table.setMinimumHeight(120)
+    h.log_preview_table.setMaximumHeight(180)
+    log_layout.addWidget(h.log_preview_table)
+    h.log_status_label = QLabel("Logs: none loaded")
+    h.log_status_label.setWordWrap(True)
+    log_layout.addWidget(h.log_status_label)
+    log_group.setLayout(log_layout)
+    layout.addWidget(log_group)
     
     # Data preview section
     preview_group = QGroupBox("Data Preview")

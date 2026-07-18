@@ -12,17 +12,31 @@ data/users.json
 data/email_config.json
 data/telemetry.db
 data/model_registry.sqlite
+data/mission_fsm.sqlite
+data/agent_*.db
+data/agent_chat_sessions.json
+data/agent_llm_*.txt
+data/agent_llm_*.json
+data/agent_smoke_*.json
+data/knowledge_index/
+data/custom_tabs/
 config/email_config.json
 config/config/
 security.log
 logs/
+reports/
 reports/auto/
 *.pkl
 *.keras
+*.sqlite
+
+# Keep sample knowledge docs; ignore local archives of non-mission PDFs
+data/knowledge/_archive/
 
 # Copilot / wrong uploads
 STDMS/
 telemetry_monitor/
+.cursor/
 
 # OS
 .DS_Store

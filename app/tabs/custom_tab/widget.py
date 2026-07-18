@@ -49,6 +49,12 @@ from PyQt5.QtWidgets import (
 )
 
 from app.models.drift import TabConceptDriftChecker, compute_adaptive_threshold
+from app.models.fsm import (
+    MissionModeStore,
+    apply_threshold_scale,
+    ensure_fsm_fields,
+    resolve_current_mode,
+)
 from app.monitoring.obs_limits import evaluate_obs_limits
 from app.reports.mission_report import export_mission_report as write_mission_report
 from app.tabs.custom_tab.model_ops import (
@@ -159,7 +165,7 @@ class CustomMonitoringTab(QWidget):
         _assert_custom_tab_configured()
         super().__init__(parent)
         self.tab_id = tab_id
-        self.config = config
+        self.config = ensure_fsm_fields(dict(config or {}))
         self.parent_window = parent
         self.data_processor = None
         self.model = None  # Keep for backward compatibility
@@ -201,7 +207,14 @@ class CustomMonitoringTab(QWidget):
         self._watched_csv_row_count = 0
         self.anomaly_events = deque(maxlen=500)
         self.last_snapshot = {}
-        self.last_obs_result = {"ok": True, "violations": []}
+        self.last_obs_result = {"ok": True, "violations": [], "mode_normal": []}
+        self.last_mllm_summary = ""
+        self.last_mllm_analysis = {}
+        self._fsm_store = MissionModeStore()
+        try:
+            self._fsm_store.sync_tab_modes(self.tab_id, self.config.get("mission_modes") or [])
+        except Exception:
+            pass
         self.initUI()
         self._bootstrap_saved_models()
         self._publish_snapshot(health_state="Idle")
@@ -299,7 +312,16 @@ class CustomMonitoringTab(QWidget):
         if not data_files:
             return False, f"No {file_type} files found in: {data_folder}"
 
-        latest_file = max(data_files, key=os.path.getmtime)
+        # Prefer agent-pinned source_file when present
+        pinned = str(self.config.get("source_file") or "").strip()
+        if pinned:
+            pin_path = Path(pinned)
+            if pin_path.is_file():
+                latest_file = pin_path
+            else:
+                latest_file = max(data_files, key=os.path.getmtime)
+        else:
+            latest_file = max(data_files, key=os.path.getmtime)
         latest_path = str(latest_file)
         latest_mtime = os.path.getmtime(latest_file)
 
@@ -370,14 +392,138 @@ class CustomMonitoringTab(QWidget):
         filtered = data.loc[ts >= start].copy()
         return filtered if len(filtered) > 0 else data.tail(self._get_monitoring_window_rows()).copy()
 
+    def _current_mission_mode(self):
+        return resolve_current_mode(self.config)
+
     def _check_obs_limits(self, data):
-        """Operational bounds check using rule_config.json."""
-        self.last_obs_result = evaluate_obs_limits(data)
+        """Operational bounds check using rule_config.json + mission-mode scaling."""
+        mode = self._current_mission_mode()
+        self.last_obs_result = evaluate_obs_limits(
+            data,
+            threshold_scale=mode.threshold_scale,
+            mission_mode=mode.name,
+        )
         return self.last_obs_result
+
+    def set_mission_mode(self, mode_name: str, *, trigger_source: str = "manual") -> None:
+        """Switch active mission mode, persist config, and record FSM history."""
+        ensure_fsm_fields(self.config)
+        mode_name = str(mode_name or "nominal").strip().lower()
+        names = {m.get("name") for m in self.config.get("mission_modes") or []}
+        if mode_name not in names:
+            mode_name = "nominal" if "nominal" in names else next(iter(names), "nominal")
+        prev = str(self.config.get("current_mission_mode") or "nominal")
+        self.config["current_mission_mode"] = mode_name
+        mode = self._current_mission_mode()
+        try:
+            self._fsm_store.sync_tab_modes(self.tab_id, self.config.get("mission_modes") or [])
+            if prev != mode_name:
+                self._fsm_store.set_mode(
+                    self.tab_id,
+                    mode_name,
+                    threshold_scale=mode.threshold_scale,
+                    trigger_source=trigger_source,
+                )
+        except Exception as exc:
+            logger.warning("FSM mode persist failed for %s: %s", self.tab_id, exc)
+        if hasattr(self.parent_window, "tab_config_manager"):
+            self.parent_window.tab_config_manager.add_config(self.tab_id, self.config)
+        if hasattr(self, "mission_mode_combo") and self.mission_mode_combo.currentText() != mode_name:
+            idx = self.mission_mode_combo.findText(mode_name)
+            if idx >= 0:
+                self.mission_mode_combo.blockSignals(True)
+                self.mission_mode_combo.setCurrentIndex(idx)
+                self.mission_mode_combo.blockSignals(False)
+        if hasattr(self, "header_mission_mode_label"):
+            self.header_mission_mode_label.setText(
+                f"{mode.name} (×{mode.threshold_scale:g})"
+            )
+        self._publish_snapshot()
+
+    def _on_mission_mode_changed(self, mode_name: str) -> None:
+        self.set_mission_mode(mode_name, trigger_source="manual")
+
+    def browse_log_file(self):
+        """Browse for a mission/event .log or .txt file (Data Import)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Log File",
+            "",
+            "Log files (*.log *.txt);;All files (*.*)",
+        )
+        if not path:
+            return
+        if hasattr(self, "log_path_input"):
+            self.log_path_input.setText(path)
+        self.config["log_file"] = path
+        if hasattr(self.parent_window, "tab_config_manager"):
+            self.parent_window.tab_config_manager.add_config(self.tab_id, self.config)
+
+    def load_log_file(self):
+        """Parse selected log file into LogMonitor (tab_log_events) and preview."""
+        path = ""
+        if hasattr(self, "log_path_input"):
+            path = self.log_path_input.text().strip()
+        if not path:
+            path = str(self.config.get("log_file") or "").strip()
+        if not path or not os.path.isfile(path):
+            QMessageBox.warning(self, "Load Logs", "Please select a valid .log or .txt file.")
+            return
+        try:
+            from app.agent.log_monitor import get_log_monitor
+
+            monitor = get_log_monitor()
+            count = monitor.ingest_file(self.tab_id, path)
+            self.config["log_file"] = path
+            if hasattr(self.parent_window, "tab_config_manager"):
+                self.parent_window.tab_config_manager.add_config(self.tab_id, self.config)
+            # Immediate rule-based analysis (LLM optional on next agent cycle)
+            analysis = monitor.analyze(
+                self.tab_id,
+                self._fsm_store,
+                tab_config=self.config,
+                apply_transitions=False,
+                use_llm=False,
+            )
+            self.last_mllm_summary = analysis.summary
+            self.last_mllm_analysis = analysis.to_dict()
+            if analysis.mode_transitions:
+                to_mode = analysis.mode_transitions[-1].get("to_mode")
+                if to_mode:
+                    self.set_mission_mode(str(to_mode), trigger_source="log_event")
+            else:
+                self._publish_snapshot()
+            self._refresh_log_preview(monitor.get_window(self.tab_id))
+            if hasattr(self, "log_status_label"):
+                self.log_status_label.setText(
+                    f"Logs: loaded {count} event(s). {analysis.summary}"
+                )
+            QMessageBox.information(
+                self,
+                "Load Logs",
+                f"Ingested {count} log event(s).\n\n{analysis.summary}",
+            )
+        except Exception as exc:
+            logger.exception("load_log_file failed")
+            QMessageBox.warning(self, "Load Logs", f"Failed to load logs:\n{exc}")
+
+    def _refresh_log_preview(self, events) -> None:
+        if not hasattr(self, "log_preview_table"):
+            return
+        rows = list(events or [])[-50:]
+        self.log_preview_table.setRowCount(len(rows))
+        for i, ev in enumerate(rows):
+            ts = ev.timestamp.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ev, "timestamp") else ""
+            self.log_preview_table.setItem(i, 0, QTableWidgetItem(ts))
+            self.log_preview_table.setItem(i, 1, QTableWidgetItem(str(getattr(ev, "level", ""))))
+            self.log_preview_table.setItem(i, 2, QTableWidgetItem(str(getattr(ev, "source", ""))))
+            self.log_preview_table.setItem(i, 3, QTableWidgetItem(str(getattr(ev, "message", ""))))
+
     def get_snapshot(self):
         return dict(self.last_snapshot or {})
 
     def _publish_snapshot(self, **fields):
+        mode = self._current_mission_mode()
         snap = {
             "tab_id": self.tab_id,
             "title": self.config.get("title", ""),
@@ -389,8 +535,14 @@ class CustomMonitoringTab(QWidget):
             "last_file": self._watched_data_path or "—",
             "last_file_rows": self._watched_csv_row_count,
             "dataset_mode": self.config.get("dataset_mode", "Full Latest File"),
+            "mission_mode": mode.name,
+            "threshold_scale": mode.threshold_scale,
             "obs_ok": self.last_obs_result.get("ok", True),
             "obs_violations": len(self.last_obs_result.get("violations", [])),
+            "obs_mode_normal": len(self.last_obs_result.get("mode_normal", [])),
+            "mllm_summary": self.last_mllm_summary or "",
+            "mllm_anomalies": len((self.last_mllm_analysis or {}).get("anomalies") or []),
+            "mllm_filtered": int((self.last_mllm_analysis or {}).get("false_positives_filtered") or 0),
             "drift": bool(self.last_drift_result.get("is_drift", False)),
             "alert_count": len(self.anomaly_events),
             "trained_models": self._count_trained_models(),
@@ -407,9 +559,20 @@ class CustomMonitoringTab(QWidget):
         if hasattr(self, "snapshot_watch_label"):
             self.snapshot_watch_label.setText(str(snap["watch_status"]))
         if hasattr(self, "snapshot_obs_label"):
-            self.snapshot_obs_label.setText(
-                "OK" if snap["obs_ok"] else f"{snap['obs_violations']} violation(s)"
+            if snap["obs_ok"]:
+                mn = snap.get("obs_mode_normal") or 0
+                self.snapshot_obs_label.setText(
+                    "OK" if not mn else f"OK ({mn} mode-normal)"
+                )
+            else:
+                self.snapshot_obs_label.setText(f"{snap['obs_violations']} violation(s)")
+        if hasattr(self, "header_mission_mode_label"):
+            self.header_mission_mode_label.setText(
+                f"{snap.get('mission_mode', 'nominal')} (×{float(snap.get('threshold_scale', 1.0)):g})"
             )
+        if hasattr(self, "snapshot_mllm_label"):
+            summary = (snap.get("mllm_summary") or "").strip()
+            self.snapshot_mllm_label.setText(summary if summary else "—")
         parent = self.parent_window
         if parent and hasattr(parent, "refresh_fleet_dashboard"):
             parent.refresh_fleet_dashboard()
@@ -572,7 +735,7 @@ class CustomMonitoringTab(QWidget):
         return self._drift_checker.set_reference(source)
 
     def _compute_adaptive_threshold(self, latest_score):
-        """Rolling median + sigma*std threshold."""
+        """Rolling median + sigma*std threshold, scaled by mission mode."""
         threshold, self.score_history = compute_adaptive_threshold(
             self.score_history,
             latest_score,
@@ -582,7 +745,13 @@ class CustomMonitoringTab(QWidget):
             threshold_max=self.threshold_max,
             score_history_maxlen=self.score_history_maxlen,
         )
-        return threshold
+        mode = self._current_mission_mode()
+        return apply_threshold_scale(
+            threshold,
+            mode.threshold_scale,
+            lo=self.threshold_min,
+            hi=self.threshold_max,
+        )
 
     def _build_xai_reasons(self, feature_df, final_score, threshold, drift_result, agent_scores):
         """Lightweight rule-based explanation builder."""
@@ -799,13 +968,15 @@ class CustomMonitoringTab(QWidget):
         page_viz_layout = QVBoxLayout(page_viz)
         page_viz_layout.setContentsMargins(0, 0, 0, 0)
         build_visualization_panel(self, page_viz_layout, slots=slots)
-        if self.data_processor and (
-            self.data_processor.data is not None or self.data_processor.preprocessed_data is not None
-        ):
-            try:
+        try:
+            if self.data_processor and (
+                self.data_processor.data is not None
+                or self.data_processor.preprocessed_data is not None
+            ):
                 slots.invoke_visualization_method(self, "update_visualization_features")
-            except Exception:
-                pass
+            slots.invoke_visualization_method(self, "update_viz_model_info")
+        except Exception:
+            pass
         self.custom_pages.addWidget(page_viz)
 
         connect_nav_pages(self)
@@ -908,37 +1079,40 @@ class CustomMonitoringTab(QWidget):
             f"New model '{model_type}' added with configured parameters."
         )
     
-    def remove_model(self, model_id):
-        """Remove a model from the tab"""
-        reply = QMessageBox.question(
-            self,
-            "Remove Model",
-            "Are you sure you want to remove this model?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            models_list = self.config.get('models', [])
-            models_list = [m for m in models_list if m.get('model_id') != model_id]
-            self.config['models'] = models_list
+    def remove_model(self, model_id, silent=False):
+        """Remove a model from the tab. silent=True skips the confirm dialog (agent Approve path)."""
+        if not silent:
+            reply = QMessageBox.question(
+                self,
+                "Remove Model",
+                "Are you sure you want to remove this model?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return False
+
+        models_list = self.config.get('models', [])
+        models_list = [m for m in models_list if m.get('model_id') != model_id]
+        self.config['models'] = models_list
             
-            # Remove from active models
-            if model_id in self.models:
-                del self.models[model_id]
+        # Remove from active models
+        if model_id in self.models:
+            del self.models[model_id]
             
-            # Save config
-            if hasattr(self.parent_window, 'tab_config_manager'):
-                self.parent_window.tab_config_manager.add_config(self.tab_id, self.config)
+        # Save config
+        if hasattr(self.parent_window, 'tab_config_manager'):
+            self.parent_window.tab_config_manager.add_config(self.tab_id, self.config)
             
-            # Update table
-            self.update_models_table()
+        # Update table
+        self.update_models_table()
             
-            # Clear selection if removed model was selected
-            if hasattr(self, 'selected_model_id') and self.selected_model_id == model_id:
-                self.models_selection_label.setText("No model selected")
-                self.save_model_btn.setEnabled(False)
-                self.model_metrics_btn.setEnabled(False)
+        # Clear selection if removed model was selected
+        if hasattr(self, 'selected_model_id') and self.selected_model_id == model_id:
+            self.models_selection_label.setText("No model selected")
+            self.save_model_btn.setEnabled(False)
+            self.model_metrics_btn.setEnabled(False)
+        return True
     
     def train_selected_model(self):
         """Train the currently selected model"""
@@ -1298,7 +1472,19 @@ class CustomMonitoringTab(QWidget):
             )
 
             if _sync:
-                success, message = model_obj.train(data, **model_params)
+                from app.ui.training_console import (
+                    TrainingConsoleBridge,
+                    append_training_header,
+                    capture_stdout,
+                    clear_training_console,
+                )
+
+                clear_training_console(self)
+                append_training_header(self, f"Training {model_type} ({model_id})")
+                bridge = TrainingConsoleBridge()
+                bridge.chunk.connect(self._on_train_log_chunk)
+                with capture_stdout(bridge):
+                    success, message = model_obj.train(data, **model_params)
                 return self._finalize_train_result(
                     success, message, model_id, model_obj, model_type, model_params, model_config, len(data), silent
                 )
@@ -1315,6 +1501,11 @@ class CustomMonitoringTab(QWidget):
                 self.train_btn.setEnabled(False)
             self._train_worker = TabTrainWorker(self, model_id, data, model_obj, model_type, model_params)
             self._train_worker.finished.connect(self._on_tab_train_finished)
+            self._train_worker.log_chunk.connect(self._on_train_log_chunk)
+            from app.ui.training_console import append_training_header, clear_training_console
+
+            clear_training_console(self)
+            append_training_header(self, f"Training {model_type} ({model_id})")
             self._train_worker.start()
             return True
 
@@ -1326,6 +1517,21 @@ class CustomMonitoringTab(QWidget):
             if hasattr(self, "train_btn"):
                 self.train_btn.setEnabled(True)
             return False
+
+    def _on_train_log_chunk(self, text: str) -> None:
+        """Mirror Keras stdout into Training Console (or results_text fallback)."""
+        from app.ui.training_console import append_console_chunk
+
+        console = getattr(self, "training_console", None)
+        if console is not None:
+            append_console_chunk(console, text)
+            return
+        if hasattr(self, "results_text") and text.strip():
+            # Fallback: only append complete lines to avoid flooding with \r updates
+            if "\n" in text:
+                for line in text.splitlines():
+                    if line.strip():
+                        self.results_text.append(line)
 
     def _on_tab_train_finished(self, success, message, model_id, model_obj):
         self._train_worker = None
@@ -1358,17 +1564,33 @@ class CustomMonitoringTab(QWidget):
                 self.model_metrics_btn.setEnabled(True)
 
             self.update_models_table()
+            try:
+                self._legacy_panel_slots().invoke_visualization_method(
+                    self, "update_viz_model_info"
+                )
+            except Exception:
+                pass
             self.results_text.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Model type: {model_type}")
             self.results_text.append(
                 f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Training completed successfully ({data_len:,} rows)"
             )
             if not silent:
                 QMessageBox.information(self, "Training Complete", f"Model training completed successfully for {model_type}!")
+            # Agent Approve chain: enqueue start_monitoring only after a real train success
+            hook = getattr(self, "_agent_post_train_hook", None)
+            if callable(hook):
+                self._agent_post_train_hook = None
+                try:
+                    hook()
+                except Exception as exc:
+                    logger.warning("agent post-train hook failed: %s", exc)
             return True
 
         self.results_text.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Training failed: {message}")
         if not silent:
             QMessageBox.warning(self, "Training Error", f"Training failed: {message}")
+        if getattr(self, "_agent_post_train_hook", None) is not None:
+            self._agent_post_train_hook = None
         return False
 
     def test_models_on_latest_window(self):
@@ -1903,9 +2125,34 @@ class CustomMonitoringTab(QWidget):
             
             # Update config and save
             old_config = self.config.copy()
-            self.config = dialog.config
+            self.config = ensure_fsm_fields(dict(dialog.config or {}))
             self.config['updated_at'] = datetime.datetime.now().isoformat()
-            
+            try:
+                self._fsm_store.sync_tab_modes(self.tab_id, self.config.get("mission_modes") or [])
+                new_mode = str(self.config.get("current_mission_mode") or "nominal")
+                old_mode = str(old_config.get("current_mission_mode") or "nominal")
+                if new_mode != old_mode:
+                    mode = self._current_mission_mode()
+                    self._fsm_store.set_mode(
+                        self.tab_id,
+                        new_mode,
+                        threshold_scale=mode.threshold_scale,
+                        trigger_source="manual",
+                    )
+            except Exception:
+                pass
+            if hasattr(self, "mission_mode_combo"):
+                self.mission_mode_combo.blockSignals(True)
+                self.mission_mode_combo.clear()
+                for m in self.config.get("mission_modes") or []:
+                    self.mission_mode_combo.addItem(str(m.get("name", "nominal")))
+                idx = self.mission_mode_combo.findText(
+                    str(self.config.get("current_mission_mode") or "nominal")
+                )
+                if idx >= 0:
+                    self.mission_mode_combo.setCurrentIndex(idx)
+                self.mission_mode_combo.blockSignals(False)
+
             # Preserve existing models (by matching model_ids)
             if 'models' in self.config:
                 # Update model_ids in new config to match existing trained models

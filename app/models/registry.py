@@ -26,6 +26,20 @@ RETRAIN_SIGNALS_REQUIRED_COLUMNS = frozenset({
     "acknowledged_by",
 })
 
+DRAFT_ALERTS_REQUIRED_COLUMNS = frozenset({
+    "id",
+    "tab_id",
+    "kind",
+    "agent_reasoning",
+    "proposed_message",
+    "proposed_payload",
+    "severity",
+    "created_at",
+    "status",
+    "actioned_by",
+    "actioned_at",
+})
+
 
 def format_registry_error(exc: BaseException) -> str:
     """Return a short operator-facing message for registry failures."""
@@ -113,6 +127,54 @@ class ModelRegistry:
         cursor.execute(f"ALTER TABLE retrain_signals RENAME TO {backup_name}")
         self._create_retrain_signals_table(cursor)
 
+    def _create_draft_alerts_table(self, cursor: sqlite3.Cursor) -> None:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS draft_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tab_id TEXT,
+                kind TEXT DEFAULT 'alert',
+                agent_reasoning TEXT,
+                proposed_message TEXT,
+                proposed_payload TEXT,
+                severity TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'pending',
+                actioned_by TEXT,
+                actioned_at DATETIME
+            )
+            """
+        )
+
+    def _migrate_draft_alerts_table(self, cursor: sqlite3.Cursor) -> None:
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='draft_alerts'"
+        )
+        if not cursor.fetchone():
+            self._create_draft_alerts_table(cursor)
+            return
+        cursor.execute("PRAGMA table_info(draft_alerts)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if DRAFT_ALERTS_REQUIRED_COLUMNS.issubset(existing_columns):
+            return
+        logger.warning(
+            "Legacy draft_alerts schema detected (%s); backing up and recreating table",
+            sorted(existing_columns),
+        )
+        backup_name = "draft_alerts_legacy"
+        suffix = 1
+        while True:
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (backup_name,),
+            )
+            if not cursor.fetchone():
+                break
+            suffix += 1
+            backup_name = f"draft_alerts_legacy_{suffix}"
+        cursor.execute(f"ALTER TABLE draft_alerts RENAME TO {backup_name}")
+        self._create_draft_alerts_table(cursor)
+
     def _initialize_db(self) -> None:
         parent = os.path.dirname(os.path.abspath(self.db_path))
         if parent:
@@ -149,6 +211,7 @@ class ModelRegistry:
         )
 
         self._migrate_retrain_signals_table(cursor)
+        self._migrate_draft_alerts_table(cursor)
 
         conn.commit()
         conn.close()
@@ -406,3 +469,176 @@ class ModelRegistry:
         updated = cursor.rowcount > 0
         conn.close()
         return updated
+
+    def create_draft_alert(
+        self,
+        *,
+        tab_id: Optional[str] = None,
+        kind: str = "alert",
+        agent_reasoning: str = "",
+        proposed_message: str = "",
+        proposed_payload: Optional[Dict[str, Any]] = None,
+        severity: str = "WARNING",
+    ) -> int:
+        """Insert a pending agent proposal. Returns draft id."""
+        kind_norm = (kind or "alert").strip().lower() or "alert"
+        if kind_norm not in (
+            "alert",
+            "config",
+            "train",
+            "create_tab",
+            "start_monitoring",
+            "stop_monitoring",
+            "remove_model",
+            "write_document",
+            "update_document",
+            "write_sop",
+            "update_sop",
+        ):
+            kind_norm = "alert"
+        sev = (severity or "WARNING").strip().upper() or "WARNING"
+        if sev not in ("INFO", "WARNING", "CRITICAL"):
+            sev = "WARNING"
+        payload_json = json.dumps(proposed_payload or {}, ensure_ascii=False, default=str)
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO draft_alerts
+            (tab_id, kind, agent_reasoning, proposed_message, proposed_payload,
+             severity, created_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (
+                tab_id,
+                kind_norm,
+                agent_reasoning or "",
+                proposed_message or "",
+                payload_json,
+                sev,
+                datetime.datetime.now().isoformat(),
+            ),
+        )
+        draft_id = int(cursor.lastrowid)
+        conn.commit()
+        conn.close()
+        return draft_id
+
+    def get_pending_draft_alerts(
+        self, *, tab_id: Optional[str] = None, kind: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        cursor = conn.cursor()
+        clauses = ["status = 'pending'"]
+        params: List[Any] = []
+        if tab_id:
+            clauses.append("tab_id = ?")
+            params.append(tab_id)
+        if kind:
+            clauses.append("kind = ?")
+            params.append(kind.strip().lower())
+        where = " AND ".join(clauses)
+        cursor.execute(
+            f"""
+            SELECT id, tab_id, kind, agent_reasoning, proposed_message, proposed_payload,
+                   severity, created_at, status, actioned_by, actioned_at
+            FROM draft_alerts
+            WHERE {where}
+            ORDER BY created_at DESC
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        keys = (
+            "id",
+            "tab_id",
+            "kind",
+            "agent_reasoning",
+            "proposed_message",
+            "proposed_payload",
+            "severity",
+            "created_at",
+            "status",
+            "actioned_by",
+            "actioned_at",
+        )
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            item = dict(zip(keys, row))
+            try:
+                item["proposed_payload"] = json.loads(item.get("proposed_payload") or "{}")
+            except json.JSONDecodeError:
+                item["proposed_payload"] = {}
+            results.append(item)
+        return results
+
+    def resolve_draft_alert(
+        self,
+        draft_id: int,
+        status: str,
+        *,
+        actioned_by: Optional[str] = None,
+    ) -> bool:
+        """Approve or reject a pending draft. status must be approved|rejected."""
+        status_norm = (status or "").strip().lower()
+        if status_norm not in ("approved", "rejected"):
+            raise ValueError("status must be 'approved' or 'rejected'")
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE draft_alerts
+            SET status = ?,
+                actioned_at = ?,
+                actioned_by = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (
+                status_norm,
+                datetime.datetime.now().isoformat(),
+                actioned_by,
+                int(draft_id),
+            ),
+        )
+        conn.commit()
+        updated = cursor.rowcount > 0
+        conn.close()
+        return updated
+
+    def get_draft_alert(self, draft_id: int) -> Optional[Dict[str, Any]]:
+        """Return one draft row by id (any status), or None."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, tab_id, kind, agent_reasoning, proposed_message, proposed_payload,
+                   severity, created_at, status, actioned_by, actioned_at
+            FROM draft_alerts
+            WHERE id = ?
+            """,
+            (int(draft_id),),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        keys = (
+            "id",
+            "tab_id",
+            "kind",
+            "agent_reasoning",
+            "proposed_message",
+            "proposed_payload",
+            "severity",
+            "created_at",
+            "status",
+            "actioned_by",
+            "actioned_at",
+        )
+        item = dict(zip(keys, row))
+        try:
+            item["proposed_payload"] = json.loads(item.get("proposed_payload") or "{}")
+        except json.JSONDecodeError:
+            item["proposed_payload"] = {}
+        return item

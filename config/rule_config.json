@@ -1,0 +1,20 @@
+{
+    "rules": [
+        {
+            "name": "High CPU Temperature",
+            "parameter": "cpu_temp",
+            "condition": "value > 80",
+            "severity": 3
+        },
+        {
+            "name": "Low Disk Space",
+            "parameter": "disk_space",
+            "condition": "value < 10",
+            "severity": 2
+        }
+    ],
+    "global_settings": {
+        "check_interval_seconds": 60,
+        "min_alert_severity": 2
+    }
+}

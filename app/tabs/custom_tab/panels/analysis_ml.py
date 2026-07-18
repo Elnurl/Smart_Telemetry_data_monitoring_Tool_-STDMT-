@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -16,6 +17,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -365,6 +367,38 @@ def build_analysis_ml_panel(host: Any, parent_layout, *, slots: LegacyPanelSlots
     h.analysis_status_label = QLabel()
     h.analysis_status_label.setWordWrap(True)
     layout.addWidget(h.analysis_status_label)
+
+    # Live Keras / training stdout (same bars as the IDE terminal)
+    console_group = QGroupBox("Training Console")
+    console_layout = QVBoxLayout(console_group)
+    console_layout.setContentsMargins(6, 6, 6, 6)
+
+    h.training_console = QPlainTextEdit()
+    h.training_console.setReadOnly(True)
+    h.training_console.setMinimumHeight(140)
+    h.training_console.setMaximumHeight(180)
+    h.training_console.setPlaceholderText("Keras/training output appears here…")
+    mono = QFont("Consolas")
+    mono.setStyleHint(QFont.Monospace)
+    mono.setPointSize(9)
+    h.training_console.setFont(mono)
+    h.training_console.setStyleSheet(
+        "QPlainTextEdit {"
+        " background-color: #1e1e1e;"
+        " color: #d4d4d4;"
+        " border: 1px solid #3c3c3c;"
+        "}"
+    )
+    console_layout.addWidget(h.training_console)
+
+    console_btn_row = QHBoxLayout()
+    clear_console_btn = QPushButton("Clear")
+    clear_console_btn.setMaximumWidth(80)
+    clear_console_btn.clicked.connect(h.training_console.clear)
+    console_btn_row.addWidget(clear_console_btn)
+    console_btn_row.addStretch()
+    console_layout.addLayout(console_btn_row)
+    layout.addWidget(console_group)
     
     # Add buttons for metrics and logs - responsive
     buttons_widget = QWidget()

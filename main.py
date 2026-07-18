@@ -62,7 +62,7 @@ except Exception:
 # UI imports
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
-                             QTextEdit, QFileDialog, QMessageBox, QComboBox,
+                             QTextEdit, QTextBrowser, QFileDialog, QMessageBox, QComboBox,
                              QTabWidget, QGroupBox, QFormLayout, QSpinBox,
                              QDoubleSpinBox, QTableWidget, QTableWidgetItem,
                              QHeaderView, QCheckBox, QRadioButton, QStackedWidget,
@@ -2013,10 +2013,16 @@ def load_rule_config(force_reload=False):
         return default_config
 
 
-def evaluate_obs_limits(data, rules=None):
+def evaluate_obs_limits(data, rules=None, threshold_scale=1.0, mission_mode=None):
     """Evaluate operational bounds (OBS) rules against the latest telemetry row."""
     if modular_evaluate_obs_limits is not None:
-        return modular_evaluate_obs_limits(data, rules, rule_config_file=RULE_CONFIG_FILE)
+        return modular_evaluate_obs_limits(
+            data,
+            rules,
+            rule_config_file=RULE_CONFIG_FILE,
+            threshold_scale=threshold_scale,
+            mission_mode=mission_mode,
+        )
 
     try:
         from app.monitoring.obs_limits import evaluate_obs_condition
@@ -2652,6 +2658,7 @@ class UserManager:
         "manage_users": {"*": ["admin"]},
         "configure_system": {"*": ["admin"]},
         "ack_alert": {"*": ["admin", "analyst"], "alert:*": ["admin", "analyst"]},
+        "create_tab": {"*": ["admin", "analyst"], "tab:*": ["admin", "analyst"]},
         "delete_tab": {"tab:*": ["admin"], "*": ["admin"]}
     }
     MAX_FAILED_ATTEMPTS = 5
@@ -5888,19 +5895,32 @@ class SafeFigureCanvas(FigureCanvas):
 class Worker(QThread):
     finished = pyqtSignal(bool, str, object)
     progress = pyqtSignal(int)
+    log_chunk = pyqtSignal(str)
     
     def __init__(self, task, *args, **kwargs):
         super().__init__()
         self.task = task
         self.args = args
         self.kwargs = kwargs
+        self._console_bridge = None
+        if task == "train_model":
+            from app.ui.training_console import TrainingConsoleBridge
+
+            self._console_bridge = TrainingConsoleBridge()
+            self._console_bridge.chunk.connect(self.log_chunk)
         
     def run(self):
         try:
             if self.task == "train_model":
                 model = self.args[0]
                 data = self.args[1]
-                result, message = model.train(data, **self.kwargs)
+                from app.ui.training_console import capture_stdout
+
+                if self._console_bridge is not None:
+                    with capture_stdout(self._console_bridge):
+                        result, message = model.train(data, **self.kwargs)
+                else:
+                    result, message = model.train(data, **self.kwargs)
                 self.finished.emit(result, message, model)
                 
             elif self.task == "predict":
@@ -7094,10 +7114,722 @@ class SecureAnomalyDetectionTool(QMainWindow):
         # Load existing custom tabs
         self.load_custom_tabs()
 
+        # Phase 0: local Instrumentation Agent bridge (read-only, localhost:8765)
+        self._start_instrumentation_agent()
+
         self.fleet_refresh_timer = QTimer(self)
         self.fleet_refresh_timer.timeout.connect(self.refresh_fleet_dashboard)
         self.fleet_refresh_timer.start(15000)
         self.refresh_fleet_dashboard()
+
+    def _start_instrumentation_agent(self):
+        """Expose tab snapshots to the local agent API and start Phase 1 monitor loop."""
+        self.agent_bridge = None
+        self.agent_loop = None
+        try:
+            from app.agent import AgentMonitorLoop, attach_agent_bridge
+
+            self.agent_bridge = attach_agent_bridge(
+                self, host="127.0.0.1", port=8765, enabled=True, allow_llm=True
+            )
+            if self.agent_bridge:
+                self.agent_loop = AgentMonitorLoop(self.agent_bridge, parent=self)
+                self.agent_loop.signals.refreshed.connect(self._on_agent_view_refreshed)
+                self.agent_loop.signals.chat_reply.connect(self._on_agent_chat_reply)
+                self.agent_loop.start(interval_seconds=60)
+                self._refresh_agent_llm_status()
+        except Exception as exc:
+            logger.warning("Instrumentation agent not started: %s", exc)
+
+    def _refresh_agent_llm_status(self):
+        label = getattr(self, "agent_llm_status_label", None)
+        loop = getattr(self, "agent_loop", None)
+        if label is None:
+            return
+        if loop is None:
+            self._set_agent_online_pill(False, model_name="")
+            return
+        try:
+            st = loop.llm_status()
+            model = str(st.get("model") or "").strip()
+            if st.get("ollama_up"):
+                self._set_agent_online_pill(True, model_name=model)
+            else:
+                self._set_agent_online_pill(False, model_name=model)
+        except Exception:
+            label.setText("status unknown")
+            label.setStyleSheet("")
+
+    def _agent_sessions_path(self):
+        return os.path.join(DATA_DIR, "agent_chat_sessions.json")
+
+    def _load_agent_sessions(self):
+        path = self._agent_sessions_path()
+        try:
+            from app.agent.chat_render import migrate_transcript_to_messages
+
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                if isinstance(data, list):
+                    cleaned = []
+                    for item in data:
+                        if not isinstance(item, dict):
+                            continue
+                        sid = str(item.get("id") or "").strip()
+                        if not sid:
+                            continue
+                        messages = item.get("messages")
+                        if not isinstance(messages, list):
+                            messages = migrate_transcript_to_messages(
+                                str(item.get("transcript") or "")
+                            )
+                        cleaned.append(
+                            {
+                                "id": sid,
+                                "title": str(item.get("title") or "New chat").strip() or "New chat",
+                                "messages": messages,
+                                "transcript": str(item.get("transcript") or ""),
+                                "updated_at": str(item.get("updated_at") or ""),
+                            }
+                        )
+                    return cleaned
+        except Exception as exc:
+            logger.warning("Could not load agent chat sessions: %s", exc)
+        return []
+
+    def _save_agent_sessions(self):
+        path = self._agent_sessions_path()
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(self._agent_sessions or [], fh, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            logger.warning("Could not save agent chat sessions: %s", exc)
+
+    def _get_agent_session(self, session_id):
+        for s in self._agent_sessions or []:
+            if s.get("id") == session_id:
+                return s
+        return None
+
+    def _init_agent_chat_sessions(self):
+        self._agent_sessions = self._load_agent_sessions()
+        if not self._agent_sessions:
+            self._agent_sessions = [
+                {
+                    "id": str(uuid.uuid4()),
+                    "title": "New chat",
+                    "messages": [],
+                    "transcript": "",
+                    "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                }
+            ]
+            self._save_agent_sessions()
+        self._refresh_agent_session_list()
+        first_id = self._agent_sessions[0]["id"]
+        self._select_agent_session(first_id, persist_current=False)
+
+    def _refresh_agent_session_list(self, filter_text=None):
+        if not hasattr(self, "agent_chat_session_list"):
+            return
+        if filter_text is None and hasattr(self, "agent_chat_search_input"):
+            filter_text = self.agent_chat_search_input.text()
+        needle = (filter_text or "").strip().lower()
+        active = getattr(self, "_agent_active_session_id", None)
+        self._agent_session_switching = True
+        self.agent_chat_session_list.clear()
+        select_row = -1
+        for idx, session in enumerate(self._agent_sessions or []):
+            title = str(session.get("title") or "New chat")
+            if needle and needle not in title.lower():
+                continue
+            item = QListWidgetItem(title)
+            item.setData(Qt.UserRole, session.get("id"))
+            self.agent_chat_session_list.addItem(item)
+            if session.get("id") == active:
+                select_row = self.agent_chat_session_list.count() - 1
+        if select_row >= 0:
+            self.agent_chat_session_list.setCurrentRow(select_row)
+        elif self.agent_chat_session_list.count() > 0 and active is None:
+            self.agent_chat_session_list.setCurrentRow(0)
+        self._agent_session_switching = False
+
+    def _filter_agent_sessions(self, *_args):
+        self._refresh_agent_session_list()
+
+    def _sync_active_session_from_view(self, *, update_title_from_first_you=False):
+        """Persist current chat messages into the active session."""
+        from app.agent.chat_render import messages_to_plain_transcript
+
+        session = self._get_agent_session(getattr(self, "_agent_active_session_id", None))
+        if session is None:
+            return
+        messages = list(getattr(self, "_agent_chat_messages", None) or [])
+        # Drop ephemeral thinking placeholder from persistence
+        messages = [m for m in messages if not m.get("thinking")]
+        session["messages"] = messages
+        session["transcript"] = messages_to_plain_transcript(messages)
+        session["updated_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+        if update_title_from_first_you or session.get("title") in ("", "New chat"):
+            for msg in messages:
+                if str(msg.get("role") or "").lower() not in ("you", "user", "operator"):
+                    continue
+                after = str(msg.get("text") or "").strip()
+                if after:
+                    session["title"] = after[:48] + ("…" if len(after) > 48 else "")
+                    break
+        self._save_agent_sessions()
+        self._refresh_agent_session_list()
+
+    def _render_agent_chat_view(self):
+        """Rebuild QTextBrowser HTML from structured messages."""
+        if not hasattr(self, "agent_view_text"):
+            return
+        from app.agent.chat_render import render_chat_document
+
+        html_doc = render_chat_document(getattr(self, "_agent_chat_messages", None) or [])
+        self.agent_view_text.setHtml(html_doc)
+        self._scroll_agent_chat_to_end()
+
+    def _select_agent_session(self, session_id, *, persist_current=True):
+        from app.agent.chat_render import migrate_transcript_to_messages
+
+        if persist_current and getattr(self, "_agent_active_session_id", None):
+            self._sync_active_session_from_view()
+        session = self._get_agent_session(session_id)
+        if session is None:
+            return
+        self._agent_session_switching = True
+        self._agent_active_session_id = session_id
+        self._agent_thinking_line = None
+        messages = session.get("messages")
+        if not isinstance(messages, list):
+            messages = migrate_transcript_to_messages(str(session.get("transcript") or ""))
+            session["messages"] = messages
+        self._agent_chat_messages = [dict(m) for m in messages]
+        self._render_agent_chat_view()
+        # Select matching list item
+        if hasattr(self, "agent_chat_session_list"):
+            for i in range(self.agent_chat_session_list.count()):
+                item = self.agent_chat_session_list.item(i)
+                if item and item.data(Qt.UserRole) == session_id:
+                    self.agent_chat_session_list.setCurrentRow(i)
+                    break
+        self._agent_session_switching = False
+
+    def _on_agent_session_item_changed(self, current, _previous):
+        if getattr(self, "_agent_session_switching", False):
+            return
+        if current is None:
+            return
+        sid = current.data(Qt.UserRole)
+        if not sid or sid == getattr(self, "_agent_active_session_id", None):
+            return
+        if getattr(self, "_agent_chat_busy", False):
+            # Stay on active session while a reply is in flight
+            self._agent_session_switching = True
+            self._refresh_agent_session_list()
+            self._agent_session_switching = False
+            return
+        self._select_agent_session(sid, persist_current=True)
+
+    def _new_agent_session(self):
+        if getattr(self, "_agent_chat_busy", False):
+            return
+        self._sync_active_session_from_view()
+        session = {
+            "id": str(uuid.uuid4()),
+            "title": "New chat",
+            "messages": [],
+            "transcript": "",
+            "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        }
+        self._agent_sessions.insert(0, session)
+        self._save_agent_sessions()
+        self._refresh_agent_session_list()
+        self._select_agent_session(session["id"], persist_current=False)
+
+    def _remove_agent_session(self):
+        if getattr(self, "_agent_chat_busy", False):
+            return
+        item = None
+        if hasattr(self, "agent_chat_session_list"):
+            item = self.agent_chat_session_list.currentItem()
+        sid = item.data(Qt.UserRole) if item else getattr(self, "_agent_active_session_id", None)
+        if not sid:
+            return
+        self._agent_sessions = [s for s in (self._agent_sessions or []) if s.get("id") != sid]
+        if not self._agent_sessions:
+            self._agent_sessions = [
+                {
+                    "id": str(uuid.uuid4()),
+                    "title": "New chat",
+                    "transcript": "",
+                    "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                }
+            ]
+        self._save_agent_sessions()
+        self._agent_active_session_id = None
+        self._refresh_agent_session_list()
+        self._select_agent_session(self._agent_sessions[0]["id"], persist_current=False)
+
+    def _clear_all_agent_sessions(self):
+        if getattr(self, "_agent_chat_busy", False):
+            return
+        reply = QMessageBox.question(
+            self,
+            "Clear All Chats",
+            "Remove all saved agent conversations?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._agent_sessions = [
+            {
+                "id": str(uuid.uuid4()),
+                "title": "New chat",
+                "transcript": "",
+                "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            }
+        ]
+        self._save_agent_sessions()
+        self._agent_active_session_id = None
+        if hasattr(self, "agent_chat_search_input"):
+            self.agent_chat_search_input.clear()
+        self._refresh_agent_session_list()
+        self._select_agent_session(self._agent_sessions[0]["id"], persist_current=False)
+
+    def _scroll_agent_chat_to_end(self):
+        if not hasattr(self, "agent_view_text"):
+            return
+        from PyQt5.QtGui import QTextCursor
+
+        cursor = self.agent_view_text.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.agent_view_text.setTextCursor(cursor)
+        self.agent_view_text.ensureCursorVisible()
+        bar = self.agent_view_text.verticalScrollBar()
+        if bar is not None:
+            bar.setValue(bar.maximum())
+
+    def _append_agent_chat(self, role: str, text: str, *, mode=None, tools=None):
+        """Append a structured chat turn and re-render HTML."""
+        if not hasattr(self, "agent_view_text"):
+            return
+        if not hasattr(self, "_agent_chat_messages"):
+            self._agent_chat_messages = []
+        role_l = (role or "system").strip().lower()
+        if role_l in ("you", "user", "operator"):
+            role_norm = "you"
+        elif role_l in ("agent", "assistant"):
+            role_norm = "agent"
+        else:
+            role_norm = "system"
+        stamp = datetime.datetime.now().strftime("%H:%M")
+        msg = {
+            "role": role_norm,
+            "text": (text or "").strip(),
+            "ts": stamp,
+        }
+        if mode:
+            msg["mode"] = str(mode)
+        if tools:
+            msg["tools"] = list(tools)
+        self._agent_chat_messages.append(msg)
+        self._render_agent_chat_view()
+        self._sync_active_session_from_view(update_title_from_first_you=(role_norm == "you"))
+
+    def _show_agent_thinking(self):
+        """Non-blocking placeholder until the real reply arrives."""
+        if not hasattr(self, "_agent_chat_messages"):
+            self._agent_chat_messages = []
+        stamp = datetime.datetime.now().strftime("%H:%M")
+        self._agent_chat_messages.append(
+            {
+                "role": "agent",
+                "text": "",
+                "ts": stamp,
+                "thinking": True,
+            }
+        )
+        self._agent_thinking_line = "thinking"
+        self._render_agent_chat_view()
+
+    def _replace_agent_thinking(self, mode: str, reply: str, *, tools=None):
+        """Replace the thinking placeholder with the real agent answer."""
+        if not hasattr(self, "_agent_chat_messages"):
+            self._agent_chat_messages = []
+        stamp = datetime.datetime.now().strftime("%H:%M")
+        body = (reply or "").strip() or "(empty reply)"
+        tool_list = list(tools or [])
+        # Prefer structured tools; also accept leading [tools: …] in reply text
+        replacement = {
+            "role": "agent",
+            "text": body,
+            "ts": stamp,
+            "mode": mode,
+        }
+        if tool_list:
+            replacement["tools"] = tool_list
+        replaced = False
+        for i in range(len(self._agent_chat_messages) - 1, -1, -1):
+            if self._agent_chat_messages[i].get("thinking"):
+                self._agent_chat_messages[i] = replacement
+                replaced = True
+                break
+        if not replaced:
+            self._agent_chat_messages.append(replacement)
+        self._agent_thinking_line = None
+        self._render_agent_chat_view()
+        self._sync_active_session_from_view()
+
+    def _set_agent_chat_busy(self, busy: bool):
+        self._agent_chat_busy = bool(busy)
+        if hasattr(self, "agent_chat_send_btn"):
+            self.agent_chat_send_btn.setEnabled(not busy)
+        if hasattr(self, "agent_chat_input"):
+            self.agent_chat_input.setEnabled(not busy)
+        if hasattr(self, "agent_view_refresh_btn"):
+            self.agent_view_refresh_btn.setEnabled(not busy)
+        for name in (
+            "agent_chat_new_btn",
+            "agent_chat_remove_btn",
+            "agent_chat_clear_btn",
+            "agent_chat_session_list",
+            "agent_rebuild_knowledge_btn",
+            "agent_view_decisions_btn",
+        ):
+            w = getattr(self, name, None)
+            if w is not None:
+                w.setEnabled(not busy)
+
+    def _on_agent_view_refreshed(self, payload: dict):
+        """Update status from periodic monitor cycles (chat stays Ask-driven)."""
+        if not hasattr(self, "agent_view_text"):
+            return
+        updated = payload.get("updated_at") or "—"
+        self.agent_view_updated_label.setText(f"last update {updated}")
+        if hasattr(self, "mllm_summary_label"):
+            mllm = (payload.get("mllm_summary") or "").strip()
+            if not mllm:
+                lines = payload.get("mllm_lines") or []
+                mllm = "\n".join(str(x) for x in lines if x)
+            self.mllm_summary_label.setText(mllm if mllm else "[M-LLM] Log analysis: —")
+        if hasattr(self, "refresh_draft_alerts_panel"):
+            self.refresh_draft_alerts_panel()
+        if hasattr(self, "refresh_retrain_signals_panel"):
+            self.refresh_retrain_signals_panel()
+        if hasattr(self, "_refresh_agent_metric_cards"):
+            self._refresh_agent_metric_cards()
+        if payload.get("llm_used"):
+            self._set_agent_online_pill(True, detail="LLM")
+        elif payload.get("ollama_up"):
+            self._set_agent_online_pill(True)
+        else:
+            self._set_agent_online_pill(False)
+
+    def _set_agent_online_pill(self, online: bool, detail: str = "", model_name: str = ""):
+        """Update header status pill to match mockup (online · model)."""
+        label = getattr(self, "agent_llm_status_label", None)
+        if label is None:
+            return
+        model = (model_name or "").strip()
+        if not model:
+            try:
+                from app.agent.ollama_client import resolve_chat_model
+
+                model = resolve_chat_model() or "qwen3:8b"
+            except Exception:
+                model = "qwen3:8b"
+        if online:
+            label.setText(f"online · {model}")
+            label.setStyleSheet("")
+        else:
+            label.setText("offline · heuristic")
+            label.setStyleSheet("")
+
+    def _on_agent_chat_reply(self, payload: dict):
+        reply = payload.get("reply") or ""
+        mode = str(payload.get("agent_mode") or payload.get("node") or "").strip()
+        mode_l = mode.lower()
+        if mode_l in ("ra-llm", "rallm", "tool"):
+            mode_label = "RA-LLM"
+        elif mode_l in ("c-llm", "cllm", "knowledge"):
+            mode_label = "C-LLM"
+        elif mode_l in ("llm",) or payload.get("llm_used"):
+            mode_label = "RA-LLM" if (payload.get("route") or "tool") == "tool" else "C-LLM"
+        elif mode_l == "tools":
+            mode_label = "RA-LLM"
+        elif mode_l == "offline":
+            mode_label = "Offline"
+        else:
+            mode_label = mode or ("RA-LLM" if payload.get("llm_used") else "Offline")
+        trace = payload.get("tool_trace") or []
+        # If tools ran, never show Offline just because final narration failed
+        if mode_label == "Offline" and any(t.get("ok") for t in (trace or [])):
+            mode_label = "RA-LLM"
+        tools = []
+        if trace:
+            for t in trace[:12]:
+                tools.append(
+                    {
+                        "tool": t.get("tool") or "?",
+                        "ok": bool(t.get("ok", True)),
+                    }
+                )
+        # Refresh M-LLM strip when Ask carried a log summary
+        if hasattr(self, "mllm_summary_label") and payload.get("log_summary"):
+            self.mllm_summary_label.setText(f"[M-LLM] {payload.get('log_summary')}")
+        self._replace_agent_thinking(mode_label, reply, tools=tools or None)
+        self._set_agent_chat_busy(False)
+        updated = datetime.datetime.now().strftime("%H:%M:%S")
+        if hasattr(self, "agent_view_updated_label"):
+            self.agent_view_updated_label.setText(f"last update {updated}")
+        if payload.get("llm_used"):
+            self._set_agent_online_pill(True, detail=mode_label)
+        self._refresh_agent_llm_status()
+        if hasattr(self, "_refresh_agent_metric_cards"):
+            self._refresh_agent_metric_cards()
+
+    def _ask_agent_async(self, msg: str):
+        """Append You turn + thinking..., then ask on a background thread."""
+        loop = getattr(self, "agent_loop", None)
+        if loop is None:
+            QMessageBox.information(self, "Agent", "Agent loop is not running.")
+            return
+        if getattr(self, "_agent_chat_busy", False):
+            return
+        msg = (msg or "").strip()
+        if not msg:
+            return
+
+        self._append_agent_chat("You", msg)
+        self._show_agent_thinking()
+        self._set_agent_chat_busy(True)
+        self._refresh_agent_llm_status()
+
+        def _run():
+            try:
+                loop.ask(msg)
+            except Exception as exc:
+                logger.warning("Agent chat failed: %s", exc)
+                loop.signals.chat_reply.emit(
+                    {
+                        "ok": False,
+                        "user_message": msg,
+                        "reply": f"Error: {exc}",
+                        "llm_used": False,
+                        "error": str(exc),
+                    }
+                )
+
+        threading.Thread(target=_run, name="stdms-agent-chat", daemon=True).start()
+
+    def send_agent_chat(self):
+        """Send operator question to the agent (background)."""
+        msg = ""
+        if hasattr(self, "agent_chat_input"):
+            msg = self.agent_chat_input.text().strip()
+            self.agent_chat_input.clear()
+        self._ask_agent_async(msg)
+
+    def _refresh_agent_metric_cards(self):
+        """No-op: metric cards were removed from the chat panel."""
+        return
+
+    def _focus_pending_agent_drafts(self):
+        """Open Home → AI Assistant and focus Pending Agent Drafts."""
+        try:
+            if hasattr(self, "tabs") and getattr(self, "dashboard_tab", None) is not None:
+                idx = self.tabs.indexOf(self.dashboard_tab)
+                if idx >= 0:
+                    self.tabs.setCurrentIndex(idx)
+            if hasattr(self, "home_subtabs"):
+                # AI Assistant is sub-tab 1 (Fleet Overview is 0)
+                self.home_subtabs.setCurrentIndex(1)
+        except Exception:
+            pass
+        if hasattr(self, "refresh_draft_alerts_panel"):
+            self.refresh_draft_alerts_panel()
+        table = getattr(self, "draft_alerts_table", None)
+        if table is not None:
+            table.setFocus()
+            table.scrollToTop()
+        self.statusBar().showMessage(
+            "Pending Agent Drafts — review Approve / Reject on Home → AI Assistant.", 5000
+        )
+
+    def refresh_agent_view_now(self):
+        """Analyze Fleet — deep health report for all tabs via Ask path."""
+        self._ask_agent_async("Give me a full health report for all tabs")
+
+    def rebuild_agent_knowledge_index(self):
+        """Background dual ingest: knowledge/space + knowledge/ground (+ FSM export)."""
+        if getattr(self, "_agent_knowledge_busy", False):
+            return
+        self._agent_knowledge_busy = True
+        if hasattr(self, "agent_rebuild_knowledge_btn"):
+            self.agent_rebuild_knowledge_btn.setEnabled(False)
+        self.statusBar().showMessage("Rebuilding dual knowledge indexes (space/ground)…", 0)
+
+        tabs_config = {}
+        try:
+            mgr = getattr(self, "tab_config_manager", None)
+            if mgr is not None and getattr(mgr, "configs", None):
+                tabs_config = dict(mgr.configs)
+            elif getattr(self, "custom_tabs", None):
+                for tid, widget in list(self.custom_tabs.items()):
+                    cfg = getattr(widget, "config", None)
+                    if isinstance(cfg, dict):
+                        tabs_config[tid] = dict(cfg)
+        except Exception:
+            tabs_config = {}
+
+        def _run():
+            try:
+                from app.agent.rag.ingest import ingest_dual_knowledge
+
+                result = ingest_dual_knowledge(tabs_config=tabs_config or None)
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
+            QTimer.singleShot(0, lambda: self._on_knowledge_rebuild_done(result))
+
+        threading.Thread(target=_run, name="stdms-rag-ingest", daemon=True).start()
+
+    def _on_knowledge_rebuild_done(self, result: dict):
+        self._agent_knowledge_busy = False
+        if hasattr(self, "agent_rebuild_knowledge_btn"):
+            self.agent_rebuild_knowledge_btn.setEnabled(True)
+        if hasattr(self, "_refresh_agent_metric_cards"):
+            self._refresh_agent_metric_cards()
+        ok = bool(result.get("ok"))
+        docs = result.get("documents", 0)
+        chunks = result.get("chunks", 0)
+        indexed = result.get("indexed", 0)
+        err = result.get("error") or (result.get("errors") or [None])[0]
+        space_n = (result.get("space") or {}).get("documents", 0)
+        ground_n = (result.get("ground") or {}).get("documents", 0)
+        fsm_path = (result.get("fsm_export") or {}).get("path")
+        if ok:
+            msg = (
+                f"Dual knowledge ready: space={space_n} doc(s), ground={ground_n} doc(s), "
+                f"{chunks} chunk(s) total ({indexed} updated). "
+                f"FSM export: {fsm_path or 'n/a'}"
+            )
+            self.statusBar().showMessage(msg, 8000)
+            if hasattr(self, "_append_agent_chat"):
+                self._append_agent_chat("System", msg)
+        else:
+            detail = err or result.get("note") or "unknown error"
+            self.statusBar().showMessage(f"Knowledge rebuild failed: {detail}", 8000)
+            QMessageBox.warning(
+                self,
+                "Rebuild Knowledge",
+                f"Could not rebuild dual knowledge indexes.\n\n{detail}\n\n"
+                "Ensure Ollama is running and: ollama pull nomic-embed-text\n"
+                "Indexes: data/knowledge_index/rag_space.sqlite + rag_ground.sqlite",
+            )
+
+    def show_agent_decisions_dialog(self):
+        """Show audit log in a scrollable dialog with optional tab filter."""
+        audit = getattr(self, "_agent_audit", None)
+        if audit is None and getattr(self, "agent_bridge", None) is not None:
+            audit = getattr(self.agent_bridge, "audit", None)
+        if audit is None:
+            QMessageBox.information(self, "Agent Decisions", "Audit log is not available.")
+            return
+        try:
+            decisions = audit.list_decisions(limit=200)
+        except Exception as exc:
+            QMessageBox.warning(self, "Agent Decisions", f"Read error: {exc}")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Agent Decisions")
+        dlg.setMinimumSize(820, 480)
+        v = QVBoxLayout(dlg)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Filter by tab:"))
+        tab_filter = QComboBox()
+        tab_filter.addItem("All tabs", None)
+        tab_ids = sorted({str(d.get("tab_id")) for d in decisions if d.get("tab_id")})
+        # Also include live custom tab titles when available
+        for tab_id, widget in getattr(self, "custom_tabs", {}).items():
+            title = None
+            try:
+                snap = widget.get_snapshot() if hasattr(widget, "get_snapshot") else {}
+                title = (snap or {}).get("title")
+            except Exception:
+                title = None
+            label = f"{title} ({tab_id[:8]}…)" if title else tab_id
+            if tab_filter.findData(tab_id) < 0:
+                tab_filter.addItem(label, tab_id)
+            if tab_id in tab_ids:
+                tab_ids.remove(tab_id)
+        for tab_id in tab_ids:
+            tab_filter.addItem(tab_id, tab_id)
+        filter_row.addWidget(tab_filter, 1)
+        v.addLayout(filter_row)
+
+        table = QTableWidget(0, 6)
+        table.setHorizontalHeaderLabels(["ID", "Time", "Tab", "Tool", "Outcome", "Reasoning"])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setWordWrap(True)
+        v.addWidget(table, 1)
+
+        def _populate(selected_tab_id=None):
+            rows = decisions
+            if selected_tab_id:
+                rows = [d for d in decisions if str(d.get("tab_id") or "") == str(selected_tab_id)]
+            table.setRowCount(len(rows))
+            for row, item in enumerate(rows):
+                cells = [
+                    str(item.get("id", "")),
+                    str(item.get("timestamp", ""))[:19],
+                    str(item.get("tab_id") or "—"),
+                    str(item.get("tool_called") or "—"),
+                    str(item.get("outcome") or "—"),
+                    str(item.get("reasoning") or item.get("context_summary") or "")[:500],
+                ]
+                for col, text in enumerate(cells):
+                    table.setItem(row, col, QTableWidgetItem(text))
+            table.resizeRowsToContents()
+
+        def _on_filter(_idx=None):
+            _populate(tab_filter.currentData())
+
+        tab_filter.currentIndexChanged.connect(_on_filter)
+        _populate(None)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.accept)
+        v.addWidget(close_btn)
+        dlg.exec_()
+
+    def closeEvent(self, event):
+        """Stop agent monitor loop and bridge on window close."""
+        try:
+            loop = getattr(self, "agent_loop", None)
+            if loop is not None:
+                loop.stop()
+                self.agent_loop = None
+        except Exception as exc:
+            logger.warning("Agent loop stop on close failed: %s", exc)
+        try:
+            from app.agent import stop_agent_bridge
+
+            stop_agent_bridge()
+        except Exception:
+            pass
+        self.agent_bridge = None
+        super().closeEvent(event)
 
     def refresh_fleet_dashboard(self):
         """Refresh fleet overview table on Dashboard."""
@@ -7218,6 +7950,663 @@ class SecureAnomalyDetectionTool(QMainWindow):
         self.statusBar().showMessage(
             f"Retrain signal #{signal_id} acknowledged by {actor}.", 5000
         )
+
+    def refresh_draft_alerts_panel(self):
+        """Show pending agent propose_* drafts (alert/config) for approval."""
+        if not hasattr(self, "draft_alerts_table"):
+            return
+        registry = getattr(self, "model_registry", None)
+        if registry is None or not hasattr(registry, "get_pending_draft_alerts"):
+            if hasattr(self, "draft_alerts_summary_label"):
+                self.draft_alerts_summary_label.setText("Model registry unavailable.")
+            return
+        try:
+            drafts = registry.get_pending_draft_alerts()
+        except Exception as exc:
+            logger.error("Failed to load pending draft alerts: %s", exc)
+            if hasattr(self, "draft_alerts_summary_label"):
+                err_text = format_registry_error(exc) if format_registry_error else str(exc)
+                self.draft_alerts_summary_label.setText(f"Could not load drafts: {err_text}")
+            return
+
+        count = len(drafts)
+        critical_n = sum(
+            1
+            for d in drafts
+            if str(d.get("severity") or "").upper() in ("CRITICAL", "ALERT")
+        )
+        warning_n = sum(
+            1 for d in drafts if str(d.get("severity") or "").upper() in ("WARNING",)
+        )
+        if hasattr(self, "draft_alerts_summary_label"):
+            if count == 0:
+                self.draft_alerts_summary_label.setText("No pending agent drafts.")
+                self.draft_alerts_summary_label.setStyleSheet("")
+            else:
+                parts = [f"{count} pending agent draft(s)"]
+                if critical_n:
+                    parts.append(f"{critical_n} CRITICAL")
+                if warning_n:
+                    parts.append(f"{warning_n} WARNING")
+                self.draft_alerts_summary_label.setText(" · ".join(parts) + " awaiting approval.")
+                if critical_n:
+                    self.draft_alerts_summary_label.setStyleSheet(
+                        "color:#c0392b;font-weight:bold;padding:4px;"
+                        "background-color:#fdecea;border:1px solid #e74c3c;border-radius:4px;"
+                    )
+                elif warning_n:
+                    self.draft_alerts_summary_label.setStyleSheet(
+                        "color:#b7791f;font-weight:bold;padding:4px;"
+                        "background-color:#fff8e6;border:1px solid #f0c36d;border-radius:4px;"
+                    )
+                else:
+                    self.draft_alerts_summary_label.setStyleSheet("")
+        for btn_name in ("draft_approve_all_btn", "draft_reject_all_btn"):
+            btn = getattr(self, btn_name, None)
+            if btn is not None:
+                btn.setEnabled(count > 0)
+        if hasattr(self, "_refresh_agent_metric_cards"):
+            self._refresh_agent_metric_cards()
+
+        # Prioritize CRITICAL → WARNING → INFO, then newest id
+        _sev_rank = {"CRITICAL": 0, "WARNING": 1, "ALERT": 1, "INFO": 2}
+        drafts = sorted(
+            drafts,
+            key=lambda d: (
+                _sev_rank.get(str(d.get("severity") or "").upper(), 9),
+                -(int(d.get("id") or 0)),
+            ),
+        )
+
+        # Short pending-actions line (watchlist + counts)
+        if hasattr(self, "pending_actions_summary_label"):
+            try:
+                from app.agent.watchlist import load_watchlist
+
+                wl = load_watchlist()
+                wl_n = len(wl.get("tabs") or [])
+                crit = sum(
+                    1
+                    for d in drafts
+                    if str(d.get("severity") or "").upper() == "CRITICAL"
+                )
+                parts = [f"Pending actions: {count} draft(s)"]
+                if crit:
+                    parts.append(f"{crit} CRITICAL")
+                parts.append(f"watchlist={wl_n}")
+                self.pending_actions_summary_label.setText(" · ".join(parts))
+            except Exception:
+                self.pending_actions_summary_label.setText(
+                    f"Pending actions: {count} draft(s)"
+                )
+
+        self.draft_alerts_table.setRowCount(count)
+        for row, draft in enumerate(drafts):
+            tab_label = self._resolve_tab_display_name(draft.get("tab_id"))
+            created_at = str(draft.get("created_at") or "—")
+            if len(created_at) > 19:
+                created_at = created_at[:19]
+            values = [
+                str(draft.get("id", "—")),
+                str(draft.get("kind") or "alert"),
+                tab_label,
+                str(draft.get("severity") or "—"),
+                str(draft.get("proposed_message") or "—")[:100],
+                str(draft.get("agent_reasoning") or "—")[:80],
+                created_at,
+            ]
+            for col, text in enumerate(values):
+                item = QTableWidgetItem(text)
+                if col == 3 and str(draft.get("severity") or "").upper() == "CRITICAL":
+                    item.setForeground(QColor("#b00020"))
+                self.draft_alerts_table.setItem(row, col, item)
+
+            draft_id = int(draft["id"])
+            actions = QWidget()
+            actions_layout = QHBoxLayout(actions)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
+            approve_btn = QPushButton("Approve")
+            reject_btn = QPushButton("Reject")
+            approve_btn.clicked.connect(
+                lambda _c=False, did=draft_id: self._resolve_draft_alert(did, "approved")
+            )
+            reject_btn.clicked.connect(
+                lambda _c=False, did=draft_id: self._resolve_draft_alert(did, "rejected")
+            )
+            actions_layout.addWidget(approve_btn)
+            actions_layout.addWidget(reject_btn)
+            self.draft_alerts_table.setCellWidget(row, 7, actions)
+
+    def _resolve_draft_alert(self, draft_id, status):
+        registry = getattr(self, "model_registry", None)
+        if registry is None or not hasattr(registry, "resolve_draft_alert"):
+            QMessageBox.warning(self, "Agent Drafts", "Model registry is not available.")
+            return
+        actor = self.current_username or "operator"
+        draft = None
+        if hasattr(registry, "get_draft_alert"):
+            try:
+                draft = registry.get_draft_alert(int(draft_id))
+            except Exception as exc:
+                logger.warning("Could not load draft %s before resolve: %s", draft_id, exc)
+        try:
+            updated = registry.resolve_draft_alert(draft_id, status, actioned_by=actor)
+        except Exception as exc:
+            logger.error("Failed to resolve draft %s: %s", draft_id, exc)
+            err_text = format_registry_error(exc) if format_registry_error else str(exc)
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Could not {status} draft #{draft_id}.\n{err_text}",
+            )
+            return
+        if not updated:
+            QMessageBox.information(
+                self,
+                "Agent Drafts",
+                f"Draft #{draft_id} was not found or is already resolved.",
+            )
+            return
+        self.refresh_draft_alerts_panel()
+        self.statusBar().showMessage(
+            f"Draft #{draft_id} {status} by {actor}.", 5000
+        )
+        if str(status).strip().lower() == "approved" and draft:
+            QTimer.singleShot(
+                0, lambda d=draft: self._execute_approved_agent_draft(d)
+            )
+
+    def _approve_all_draft_alerts(self):
+        self._bulk_resolve_draft_alerts("approved")
+
+    def _reject_all_draft_alerts(self):
+        self._bulk_resolve_draft_alerts("rejected")
+
+    def _bulk_resolve_draft_alerts(self, status: str):
+        """Approve or reject every pending draft (with confirmation)."""
+        registry = getattr(self, "model_registry", None)
+        if registry is None or not hasattr(registry, "get_pending_draft_alerts"):
+            QMessageBox.warning(self, "Agent Drafts", "Model registry is not available.")
+            return
+        try:
+            drafts = list(registry.get_pending_draft_alerts() or [])
+        except Exception as exc:
+            err_text = format_registry_error(exc) if format_registry_error else str(exc)
+            QMessageBox.warning(self, "Agent Drafts", f"Could not load drafts.\n{err_text}")
+            return
+        if not drafts:
+            QMessageBox.information(self, "Agent Drafts", "No pending drafts to process.")
+            return
+
+        status_l = str(status).strip().lower()
+        action_word = "Approve" if status_l == "approved" else "Reject"
+        n = len(drafts)
+        kinds = {}
+        for d in drafts:
+            k = str(d.get("kind") or "alert")
+            kinds[k] = kinds.get(k, 0) + 1
+        kind_summary = ", ".join(f"{c}× {k}" for k, c in sorted(kinds.items()))
+        reply = QMessageBox.question(
+            self,
+            f"{action_word} All Drafts",
+            f"{action_word} all {n} pending draft(s)?\n\n{kind_summary}\n\n"
+            + (
+                "Approved drafts will run their actions (create tab / train / start / stop / …)."
+                if status_l == "approved"
+                else "Rejected drafts are dismissed and will not run."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        actor = self.current_username or "operator"
+        ok_n = 0
+        fail_n = 0
+        approved_to_run = []
+        # Process oldest first so create_tab → train chains stay sensible
+        ordered = sorted(drafts, key=lambda d: int(d.get("id") or 0))
+        for draft in ordered:
+            draft_id = draft.get("id")
+            if draft_id is None:
+                fail_n += 1
+                continue
+            # Reload full draft before resolve (payload needed for execute)
+            full = draft
+            if hasattr(registry, "get_draft_alert"):
+                try:
+                    loaded = registry.get_draft_alert(int(draft_id))
+                    if loaded:
+                        full = loaded
+                except Exception:
+                    pass
+            try:
+                updated = registry.resolve_draft_alert(
+                    int(draft_id), status_l, actioned_by=actor
+                )
+            except Exception as exc:
+                logger.error("Bulk %s failed for draft %s: %s", status_l, draft_id, exc)
+                fail_n += 1
+                continue
+            if not updated:
+                fail_n += 1
+                continue
+            ok_n += 1
+            if status_l == "approved" and full:
+                approved_to_run.append(full)
+
+        self.refresh_draft_alerts_panel()
+        self.statusBar().showMessage(
+            f"{action_word} All: {ok_n} ok, {fail_n} failed (by {actor}).", 8000
+        )
+
+        # Run approved actions sequentially on the GUI thread
+        if approved_to_run:
+            def _run_next(queue, idx=0):
+                if idx >= len(queue):
+                    self.refresh_draft_alerts_panel()
+                    return
+                try:
+                    self._execute_approved_agent_draft(queue[idx])
+                except Exception as exc:
+                    logger.error("Bulk execute draft failed: %s", exc)
+                QTimer.singleShot(50, lambda: _run_next(queue, idx + 1))
+
+            QTimer.singleShot(0, lambda: _run_next(list(approved_to_run), 0))
+
+    def _execute_approved_agent_draft(self, draft):
+        """Run train / create_tab / start|stop monitoring after human Approve (GUI thread)."""
+        if not isinstance(draft, dict):
+            return
+        kind = str(draft.get("kind") or "").strip().lower()
+        try:
+            if kind == "train":
+                self._execute_approved_train(draft)
+            elif kind == "create_tab":
+                self._execute_approved_create_tab(draft)
+            elif kind == "start_monitoring":
+                self._execute_approved_start_monitoring(draft)
+            elif kind == "stop_monitoring":
+                self._execute_approved_stop_monitoring(draft)
+            elif kind == "remove_model":
+                self._execute_approved_remove_model(draft)
+            elif kind in ("write_document", "update_document"):
+                self._execute_approved_document(draft)
+            elif kind in ("write_sop", "update_sop"):
+                self._execute_approved_sop(draft)
+        except Exception as exc:
+            logger.error("Approved draft execute failed (%s): %s", kind, exc)
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Draft was approved but the action failed.\n{exc}",
+            )
+
+    def _execute_approved_train(self, draft):
+        tab_id = draft.get("tab_id")
+        payload = draft.get("proposed_payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        model_id = payload.get("model_id") or None
+        widget = (getattr(self, "custom_tabs", None) or {}).get(tab_id)
+        if widget is None or not hasattr(widget, "train_model"):
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Cannot train: tab '{tab_id}' is not open.",
+            )
+            return
+        title = (getattr(widget, "config", None) or {}).get("title") or tab_id
+
+        # Enqueue start_monitoring only after train actually finishes (not when worker starts)
+        def _on_train_success():
+            try:
+                trained = 0
+                if hasattr(widget, "_count_trained_models"):
+                    trained = int(widget._count_trained_models() or 0)
+                if trained < 1:
+                    return
+                did = self._enqueue_start_monitoring_draft(tab_id, title=str(title))
+                if did and hasattr(self, "refresh_draft_alerts_panel"):
+                    self.refresh_draft_alerts_panel()
+                if did:
+                    msg = (
+                        f"Train completed for '{title}'. "
+                        f"Pending start_monitoring draft #{did} — Approve to go online."
+                    )
+                    self.statusBar().showMessage(msg, 10000)
+                    if hasattr(self, "_append_agent_chat"):
+                        try:
+                            self._append_agent_chat("System", msg)
+                        except Exception:
+                            pass
+            except Exception as exc:
+                logger.warning("post-train start draft failed: %s", exc)
+
+        try:
+            widget._agent_post_train_hook = _on_train_success
+        except Exception:
+            pass
+
+        ok = widget.train_model(model_id=model_id, silent=False)
+        if ok is False:
+            try:
+                widget._agent_post_train_hook = None
+            except Exception:
+                pass
+            self.statusBar().showMessage(
+                f"Approved train for '{title}' did not start (see messages).", 8000
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Training started for '{title}' (approved draft).", 8000
+            )
+
+    def _resolve_draft_tab_widget(self, draft):
+        tab_id = draft.get("tab_id")
+        payload = draft.get("proposed_payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        tabs = getattr(self, "custom_tabs", None) or {}
+        widget = tabs.get(tab_id) if tab_id else None
+        if widget is None:
+            want = str(payload.get("title") or "").strip().lower()
+            if want:
+                for tid, w in tabs.items():
+                    title = str((getattr(w, "config", None) or {}).get("title") or "").strip().lower()
+                    if title == want or want in title:
+                        return tid, w
+        return tab_id, widget
+
+    def _execute_approved_start_monitoring(self, draft):
+        tab_id, widget = self._resolve_draft_tab_widget(draft)
+        if widget is None or not hasattr(widget, "start_monitoring"):
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Cannot start monitoring: tab '{tab_id}' is not open.",
+            )
+            return
+        if getattr(widget, "monitoring_active", False):
+            title = (getattr(widget, "config", None) or {}).get("title") or tab_id
+            self.statusBar().showMessage(
+                f"Tab '{title}' is already monitoring.", 6000
+            )
+            return
+        widget.start_monitoring()
+        title = (getattr(widget, "config", None) or {}).get("title") or tab_id
+        if hasattr(self, "refresh_fleet_dashboard"):
+            self.refresh_fleet_dashboard()
+        self.statusBar().showMessage(
+            f"Monitoring started for '{title}' (approved draft).", 8000
+        )
+
+    def _execute_approved_stop_monitoring(self, draft):
+        tab_id, widget = self._resolve_draft_tab_widget(draft)
+        if widget is None or not hasattr(widget, "stop_monitoring"):
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Cannot stop monitoring: tab '{tab_id}' is not open.",
+            )
+            return
+        widget.stop_monitoring()
+        title = (getattr(widget, "config", None) or {}).get("title") or tab_id
+        if hasattr(self, "refresh_fleet_dashboard"):
+            self.refresh_fleet_dashboard()
+        self.statusBar().showMessage(
+            f"Monitoring stopped for '{title}' (approved draft).", 8000
+        )
+
+    def _execute_approved_remove_model(self, draft):
+        tab_id, widget = self._resolve_draft_tab_widget(draft)
+        payload = draft.get("proposed_payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        model_id = str(payload.get("model_id") or "").strip()
+        if widget is None or not hasattr(widget, "remove_model"):
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Cannot remove model: tab '{tab_id}' is not open.",
+            )
+            return
+        if not model_id:
+            QMessageBox.warning(self, "Agent Drafts", "Draft is missing model_id.")
+            return
+        ok = widget.remove_model(model_id, silent=True)
+        title = (getattr(widget, "config", None) or {}).get("title") or tab_id
+        if ok is False:
+            self.statusBar().showMessage(
+                f"Model remove cancelled or failed on '{title}'.", 6000
+            )
+            return
+        self.statusBar().showMessage(
+            f"Removed model {model_id[:8]}… from '{title}' (approved draft).", 8000
+        )
+
+    def _execute_approved_document(self, draft):
+        """Write/update a knowledge MD/TXT after Approve."""
+        from app.agent.docs_io import write_knowledge_document
+
+        payload = draft.get("proposed_payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        filename = str(payload.get("filename") or "").strip()
+        content = payload.get("content")
+        kind = str(draft.get("kind") or "").strip().lower()
+        mode = "update" if kind == "update_document" else "write"
+        if not filename:
+            QMessageBox.warning(self, "Agent Drafts", "Draft is missing filename.")
+            return
+        result = write_knowledge_document(filename, content if content is not None else "", mode=mode)
+        if not result.get("ok"):
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Document action failed: {result.get('error') or result.get('status')}",
+            )
+            return
+        msg = (
+            f"Knowledge doc '{result.get('filename')}' {result.get('status')}. "
+            "Click Rebuild Knowledge to refresh the RAG index."
+        )
+        self.statusBar().showMessage(msg, 12000)
+        if hasattr(self, "_append_agent_chat"):
+            try:
+                self._append_agent_chat("System", msg)
+            except Exception:
+                pass
+
+    def _execute_approved_sop(self, draft):
+        """Create/update SOP Word (.docx) from template after Approve."""
+        from app.agent.docs_io import write_sop_document
+
+        payload = draft.get("proposed_payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        filename = str(payload.get("filename") or "").strip()
+        fields = payload.get("sop_fields") if isinstance(payload.get("sop_fields"), dict) else {}
+        kind = str(draft.get("kind") or "").strip().lower()
+        mode = "update" if kind == "update_sop" else "write"
+        result = write_sop_document(fields, filename=filename or None, mode=mode)
+        if not result.get("ok"):
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"SOP Word action failed: {result.get('error') or result.get('status')}",
+            )
+            return
+        msg = (
+            f"SOP Word doc '{result.get('filename')}' {result.get('status')} "
+            f"(template {result.get('template_id')}). "
+            "Open it from data/knowledge. Rebuild Knowledge if needed."
+        )
+        self.statusBar().showMessage(msg, 14000)
+        if hasattr(self, "_append_agent_chat"):
+            try:
+                self._append_agent_chat("System", msg)
+            except Exception:
+                pass
+
+    def _execute_approved_create_tab(self, draft):
+        # Same capability as + New Tab menu: admin (manage_users) or create_tab role.
+        if hasattr(self, "service_layer") and hasattr(self, "current_username"):
+            try:
+                can_create = self.service_layer.authorize(
+                    self.current_username, "create_tab", resource="*"
+                ) or self.service_layer.authorize(
+                    self.current_username, "manage_users", resource="admin/users"
+                )
+                if not can_create:
+                    QMessageBox.warning(
+                        self,
+                        "Permission Denied",
+                        "You do not have permission to create tabs.",
+                    )
+                    return
+            except Exception as exc:
+                logger.warning("create_tab authorize check failed: %s", exc)
+        payload = draft.get("proposed_payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        partial = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+        try:
+            from app.monitoring.tab_config import default_tab_config
+        except Exception:
+            default_tab_config = None
+        title = str(partial.get("title") or "Agent Tab").strip() or "Agent Tab"
+        # Upgrade weak titles from source_file / data path
+        try:
+            from app.agent.smart_config import _ideal_title_from_hint, is_weak_title
+
+            if is_weak_title(title):
+                src = str(partial.get("source_file") or "")
+                hint = Path(src).stem if src else Path(str(partial.get("data_folder") or "")).name
+                title = _ideal_title_from_hint(hint, fallback="Health Monitoring")
+        except Exception:
+            pass
+        if default_tab_config is not None:
+            config = default_tab_config(title=title)
+            config.update(partial)
+            config["title"] = title
+        else:
+            config = dict(partial)
+            config.setdefault("title", title)
+        # Ensure each model entry has a model_id
+        models = config.get("models")
+        if isinstance(models, list):
+            for m in models:
+                if isinstance(m, dict) and not m.get("model_id"):
+                    m["model_id"] = str(uuid.uuid4())
+        config.setdefault("created_at", datetime.datetime.now().isoformat())
+        config["updated_at"] = datetime.datetime.now().isoformat()
+        # Reject create if data folder is missing (same guard as propose_create_tab)
+        data_folder = str(config.get("data_folder") or "").strip()
+        if data_folder and not Path(data_folder).is_dir():
+            QMessageBox.warning(
+                self,
+                "Agent Drafts",
+                f"Cannot create tab: Data folder does not exist:\n{data_folder}",
+            )
+            return
+        tab_id = self._create_custom_tab_from_config(config)
+        if tab_id:
+            self.statusBar().showMessage(
+                f"Created tab '{config.get('title')}' from approved draft.", 8000
+            )
+            # Chain: enqueue train drafts for each suggested model (still Approve-gated)
+            self._enqueue_post_create_train_drafts(tab_id, config)
+
+    def _enqueue_post_create_train_drafts(self, tab_id, config):
+        """After create_tab Approve, propose train for each model (Propose→Approve)."""
+        registry = getattr(self, "model_registry", None)
+        if registry is None or not hasattr(registry, "create_draft_alert"):
+            return
+        models = config.get("models") if isinstance(config, dict) else None
+        if not isinstance(models, list) or not models:
+            return
+        title = (config or {}).get("title") or tab_id
+        created = []
+        for m in models:
+            if not isinstance(m, dict):
+                continue
+            mid = m.get("model_id")
+            mtype = m.get("model_type") or "model"
+            if not mid:
+                continue
+            try:
+                did = registry.create_draft_alert(
+                    tab_id=tab_id,
+                    kind="train",
+                    agent_reasoning=(
+                        f"Auto-follow-up after create_tab Approve: train {mtype} "
+                        f"so monitoring can start."
+                    ),
+                    proposed_message=f"Train {mtype} on '{title}'",
+                    proposed_payload={"model_id": str(mid), "model_type": mtype},
+                    severity="INFO",
+                )
+                created.append(did)
+            except Exception as exc:
+                logger.warning("Could not enqueue train draft for %s: %s", mid, exc)
+        if created:
+            msg = (
+                f"Created tab '{title}'. Pending train draft(s) #{', #'.join(str(x) for x in created)} — "
+                "Approve each (or in order) under Pending Agent Drafts, then Start Monitoring."
+            )
+            self.statusBar().showMessage(msg, 12000)
+            if hasattr(self, "refresh_draft_alerts_panel"):
+                self.refresh_draft_alerts_panel()
+            if hasattr(self, "_append_agent_chat"):
+                try:
+                    self._append_agent_chat("System", msg)
+                except Exception:
+                    pass
+
+    def _enqueue_start_monitoring_draft(self, tab_id, title=""):
+        registry = getattr(self, "model_registry", None)
+        if registry is None or not hasattr(registry, "create_draft_alert"):
+            return None
+        # Dedupe pending start drafts for this tab
+        try:
+            pending = registry.get_pending_draft_alerts(tab_id=tab_id, kind="start_monitoring")
+            if pending:
+                return pending[0].get("id")
+        except Exception:
+            pass
+        try:
+            return registry.create_draft_alert(
+                tab_id=tab_id,
+                kind="start_monitoring",
+                agent_reasoning="Auto-follow-up after train Approve: start monitoring when ready.",
+                proposed_message=f"Start monitoring on '{title or tab_id}'",
+                proposed_payload={"title": title or ""},
+                severity="INFO",
+            )
+        except Exception as exc:
+            logger.warning("Could not enqueue start_monitoring draft: %s", exc)
+            return None
+
+    def _create_custom_tab_from_config(self, config):
+        """Persist and open a custom monitoring tab from a config dict."""
+        if not isinstance(config, dict) or not config.get("title"):
+            raise ValueError("Invalid tab config: title is required")
+        tab_id = str(uuid.uuid4())
+        self.tab_config_manager.add_config(tab_id, config)
+        custom_tab = CustomMonitoringTab(tab_id, config, self)
+        tab_index = self.tabs.addTab(custom_tab, config["title"])
+        self.custom_tabs[tab_id] = custom_tab
+        self.tabs.setCurrentIndex(tab_index)
+        if hasattr(self, "refresh_fleet_dashboard"):
+            self.refresh_fleet_dashboard()
+        logger.info(
+            "Created custom monitoring tab from approved draft: %s (ID: %s)",
+            config.get("title"),
+            tab_id,
+        )
+        return tab_id
 
     def open_first_custom_tab(self, section_index=0):
         """Open a custom tab and switch to an internal section."""
@@ -7403,6 +8792,8 @@ class SecureAnomalyDetectionTool(QMainWindow):
             else:
                 bar.setTabText(idx, "")
                 bar.setTabToolTip(idx, tip)
+        # Hiding Home can make Qt select Administration; always land on Home.
+        self._show_home_tab()
     
     def setup_custom_tabs_button(self):
         """Placeholder - button is now added to toolbar in setup_toolbar()"""
@@ -7603,23 +8994,306 @@ class SecureAnomalyDetectionTool(QMainWindow):
             QApplication.quit()
 
     def setup_dashboard_tab(self):
-        # Main layout with scroll area for responsive design
+        # Home = flat underline sub-tabs (Material-style), not folder tabs
         main_layout = QVBoxLayout(self.dashboard_tab)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Create scroll area
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        
-        # Container widget for scroll area
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(0)
+
+        home_card = QFrame()
+        home_card.setObjectName("homeCard")
+        home_card.setStyleSheet(
+            """
+            QFrame#homeCard {
+                background-color: #ffffff;
+                border: 1px solid #e6e6e6;
+                border-radius: 8px;
+            }
+            """
+        )
+        home_card.setFrameShape(QFrame.NoFrame)
+        card_layout = QVBoxLayout(home_card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
+
+        self.home_subtabs = QTabWidget()
+        self.home_subtabs.setObjectName("homeSubTabs")
+        self.home_subtabs.setDocumentMode(True)
+        self.home_subtabs.tabBar().setExpanding(False)
+        self.home_subtabs.tabBar().setDrawBase(False)
+        self.home_subtabs.setStyleSheet(
+            """
+            QTabWidget#homeSubTabs {
+                background: transparent;
+                border: none;
+            }
+            QTabWidget#homeSubTabs::pane {
+                border: none;
+                border-top: 1px solid #eeeeee;
+                background: #ffffff;
+                top: 0px;
+                margin: 0px;
+                padding: 8px;
+            }
+            QTabWidget#homeSubTabs QTabBar {
+                background: transparent;
+                border: none;
+                alignment: left;
+            }
+            QTabWidget#homeSubTabs QTabBar::tab {
+                background: transparent;
+                color: #616161;
+                padding: 12px 20px 10px 20px;
+                margin: 0px 2px 0px 0px;
+                border: none;
+                border-bottom: 3px solid transparent;
+                font-size: 13px;
+                font-weight: 400;
+                min-width: 0px;
+            }
+            QTabWidget#homeSubTabs QTabBar::tab:selected {
+                color: #212121;
+                font-weight: 700;
+                border: none;
+                border-bottom: 3px solid #212121;
+                background: transparent;
+            }
+            QTabWidget#homeSubTabs QTabBar::tab:hover:!selected {
+                color: #424242;
+                background: transparent;
+                border-bottom: 3px solid transparent;
+            }
+            """
+        )
+        card_layout.addWidget(self.home_subtabs, 1)
+        main_layout.addWidget(home_card, 1)
+
+        # ----- Sub-tab 1: AI Assistant + Pending Agent Drafts -----
+        agent_page = QWidget()
+        agent_page_layout = QVBoxLayout(agent_page)
+        agent_page_layout.setSpacing(10)
+        agent_page_layout.setContentsMargins(10, 10, 10, 10)
+
+        agent_view_group = QGroupBox("Instrumentation Agent")
+        agent_view_outer = QVBoxLayout()
+        agent_splitter = QSplitter(Qt.Horizontal)
+        agent_splitter.setChildrenCollapsible(False)
+
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(4, 4, 4, 4)
+        left_layout.setSpacing(6)
+
+        self.agent_chat_new_btn = QPushButton("New")
+        self.agent_chat_new_btn.setToolTip("Start a new conversation")
+        self.agent_chat_new_btn.clicked.connect(self._new_agent_session)
+        left_layout.addWidget(self.agent_chat_new_btn)
+
+        search_row = QHBoxLayout()
+        self.agent_chat_search_input = QLineEdit()
+        self.agent_chat_search_input.setPlaceholderText("Search title here...")
+        self.agent_chat_search_input.textChanged.connect(self._filter_agent_sessions)
+        self.agent_chat_search_btn = QPushButton("Search Title")
+        self.agent_chat_search_btn.clicked.connect(self._filter_agent_sessions)
+        search_row.addWidget(self.agent_chat_search_input, 1)
+        search_row.addWidget(self.agent_chat_search_btn)
+        left_layout.addLayout(search_row)
+
+        self.agent_chat_session_list = QListWidget()
+        self.agent_chat_session_list.setMinimumWidth(220)
+        self.agent_chat_session_list.setMinimumHeight(280)
+        self.agent_chat_session_list.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.agent_chat_session_list.setAlternatingRowColors(True)
+        self.agent_chat_session_list.currentItemChanged.connect(self._on_agent_session_item_changed)
+        left_layout.addWidget(self.agent_chat_session_list, 1)
+
+        left_btn_row = QHBoxLayout()
+        self.agent_chat_remove_btn = QPushButton("Remove")
+        self.agent_chat_remove_btn.clicked.connect(self._remove_agent_session)
+        self.agent_chat_clear_btn = QPushButton("Clear All")
+        self.agent_chat_clear_btn.clicked.connect(self._clear_all_agent_sessions)
+        left_btn_row.addWidget(self.agent_chat_remove_btn)
+        left_btn_row.addWidget(self.agent_chat_clear_btn)
+        left_layout.addLayout(left_btn_row)
+
+        right_panel = QWidget()
+        agent_view_layout = QVBoxLayout(right_panel)
+        agent_view_layout.setContentsMargins(4, 4, 4, 4)
+        agent_view_layout.setSpacing(6)
+        agent_header = QHBoxLayout()
+        self.agent_view_title_label = QLabel("Instrumentation Agent")
+        self.agent_view_title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.agent_llm_status_label = QLabel("checking…")
+        self.agent_view_updated_label = QLabel("last update —")
+        agent_header.addWidget(self.agent_view_title_label)
+        agent_header.addWidget(self.agent_llm_status_label)
+        agent_header.addStretch()
+        agent_header.addWidget(self.agent_view_updated_label)
+        agent_view_layout.addLayout(agent_header)
+
+        self.mllm_summary_label = QLabel("[M-LLM] Log analysis: —")
+        self.mllm_summary_label.setWordWrap(True)
+        self.mllm_summary_label.setStyleSheet(
+            "QLabel { color: #334155; background: #f1f5f9; padding: 8px 10px; "
+            "border-radius: 4px; font-size: 12px; }"
+        )
+        agent_view_layout.addWidget(self.mllm_summary_label)
+
+        self.agent_view_text = QTextBrowser()
+        self.agent_view_text.setReadOnly(True)
+        self.agent_view_text.setOpenExternalLinks(False)
+        self.agent_view_text.setMinimumHeight(360)
+        self.agent_view_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._agent_chat_messages = []
+        self.agent_view_text.setHtml(
+            "<html><body style='background:#ffffff;color:#555555;font-style:italic;"
+            "padding:28px;text-align:center;font-size:15px;'>"
+            "Chat history appears here. Ask a question or click Analyze Fleet."
+            "</body></html>"
+        )
+        agent_view_layout.addWidget(self.agent_view_text, 1)
+        self._agent_thinking_line = None
+        self._agent_chat_busy = False
+
+        chat_row = QHBoxLayout()
+        chat_row.setSpacing(10)
+        self.agent_chat_input = QLineEdit()
+        self.agent_chat_input.setPlaceholderText("Ask about your fleet…")
+        self.agent_chat_input.setMinimumHeight(48)
+        self.agent_chat_input.setFont(QFont("Segoe UI", 14))
+        self.agent_chat_input.setStyleSheet(
+            "QLineEdit {"
+            "  padding: 10px 14px;"
+            "  font-size: 15px;"
+            "  border: 1px solid #c8cdd3;"
+            "  border-radius: 6px;"
+            "  background: #ffffff;"
+            "}"
+            "QLineEdit:focus { border: 1px solid #1976d2; }"
+        )
+        self.agent_chat_input.returnPressed.connect(self.send_agent_chat)
+        self.agent_chat_send_btn = QPushButton("Ask")
+        self.agent_chat_send_btn.setMinimumHeight(48)
+        self.agent_chat_send_btn.setMinimumWidth(78)
+        self.agent_chat_send_btn.setFont(QFont("Segoe UI", 13))
+        self.agent_chat_send_btn.setStyleSheet(
+            "QPushButton {"
+            "  padding: 10px 18px;"
+            "  font-size: 14px;"
+            "  font-weight: 600;"
+            "  border: 1px solid #c8cdd3;"
+            "  border-radius: 6px;"
+            "  background: #f5f7f9;"
+            "}"
+            "QPushButton:hover { background: #e8eef4; }"
+        )
+        self.agent_chat_send_btn.clicked.connect(self.send_agent_chat)
+        chat_row.addWidget(self.agent_chat_input, 1)
+        chat_row.addWidget(self.agent_chat_send_btn)
+        agent_view_layout.addLayout(chat_row)
+
+        agent_btn_row = QHBoxLayout()
+        agent_btn_row.setSpacing(6)
+        agent_btn_row.setContentsMargins(0, 4, 0, 0)
+        _agent_action_btn_style = (
+            "QPushButton {"
+            "  padding: 3px 10px;"
+            "  font-size: 11px;"
+            "  min-height: 24px;"
+            "  max-height: 26px;"
+            "  border: 1px solid #d0d5db;"
+            "  border-radius: 4px;"
+            "  background: #fafafa;"
+            "  color: #455a64;"
+            "}"
+            "QPushButton:hover { background: #f0f2f5; }"
+        )
+        self.agent_view_decisions_btn = QPushButton("View Decisions")
+        self.agent_view_decisions_btn.setStyleSheet(_agent_action_btn_style)
+        self.agent_view_decisions_btn.clicked.connect(self.show_agent_decisions_dialog)
+        self.agent_view_refresh_btn = QPushButton("Analyze Fleet")
+        self.agent_view_refresh_btn.setStyleSheet(_agent_action_btn_style)
+        self.agent_view_refresh_btn.clicked.connect(self.refresh_agent_view_now)
+        self.agent_rebuild_knowledge_btn = QPushButton("Rebuild Knowledge")
+        self.agent_rebuild_knowledge_btn.setStyleSheet(_agent_action_btn_style)
+        self.agent_rebuild_knowledge_btn.setToolTip(
+            "Export tab FSM mission modes → data/knowledge/space/, then index "
+            "space/ and ground/ into separate RAG stores (requires Ollama nomic-embed-text)."
+        )
+        self.agent_rebuild_knowledge_btn.clicked.connect(self.rebuild_agent_knowledge_index)
+        agent_btn_row.addWidget(self.agent_view_decisions_btn)
+        agent_btn_row.addWidget(self.agent_view_refresh_btn)
+        agent_btn_row.addWidget(self.agent_rebuild_knowledge_btn)
+        agent_btn_row.addStretch()
+        agent_view_layout.addLayout(agent_btn_row)
+
+        agent_splitter.addWidget(left_panel)
+        agent_splitter.addWidget(right_panel)
+        agent_splitter.setStretchFactor(0, 0)
+        agent_splitter.setStretchFactor(1, 1)
+        agent_splitter.setSizes([280, 720])
+        agent_splitter.setMinimumHeight(420)
+        agent_view_outer.addWidget(agent_splitter, 1)
+        agent_view_group.setLayout(agent_view_outer)
+        agent_view_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        agent_page_layout.addWidget(agent_view_group, 4)
+
+        drafts_group = QGroupBox("Pending Agent Drafts")
+        drafts_layout = QVBoxLayout()
+        self.draft_alerts_summary_label = QLabel("No pending agent drafts.")
+        self.draft_alerts_summary_label.setWordWrap(True)
+        drafts_layout.addWidget(self.draft_alerts_summary_label)
+        self.pending_actions_summary_label = QLabel("Pending actions: 0 draft(s) · watchlist=0")
+        self.pending_actions_summary_label.setWordWrap(True)
+        self.pending_actions_summary_label.setStyleSheet("color: #555; font-size: 11px;")
+        drafts_layout.addWidget(self.pending_actions_summary_label)
+        self.draft_alerts_table = QTableWidget(0, 8)
+        self.draft_alerts_table.setHorizontalHeaderLabels([
+            "ID", "Kind", "Tab", "Severity", "Message", "Reasoning", "Created", "Action",
+        ])
+        self.draft_alerts_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.draft_alerts_table.setAlternatingRowColors(True)
+        self.draft_alerts_table.setMinimumHeight(140)
+        self.draft_alerts_table.setMaximumHeight(260)
+        self.draft_alerts_table.verticalHeader().setVisible(False)
+        drafts_layout.addWidget(self.draft_alerts_table)
+        drafts_btn_row = QHBoxLayout()
+        drafts_refresh_btn = QPushButton("Refresh Drafts")
+        drafts_refresh_btn.clicked.connect(self.refresh_draft_alerts_panel)
+        self.draft_approve_all_btn = QPushButton("Approve All")
+        self.draft_approve_all_btn.setToolTip("Approve every pending agent draft (runs each action)")
+        self.draft_approve_all_btn.clicked.connect(self._approve_all_draft_alerts)
+        self.draft_reject_all_btn = QPushButton("Reject All")
+        self.draft_reject_all_btn.setToolTip("Reject / dismiss every pending agent draft")
+        self.draft_reject_all_btn.clicked.connect(self._reject_all_draft_alerts)
+        drafts_btn_row.addWidget(drafts_refresh_btn)
+        drafts_btn_row.addWidget(self.draft_approve_all_btn)
+        drafts_btn_row.addWidget(self.draft_reject_all_btn)
+        drafts_btn_row.addStretch()
+        drafts_layout.addLayout(drafts_btn_row)
+        drafts_group.setLayout(drafts_layout)
+        agent_page_layout.addWidget(drafts_group, 0)
+
+        self._agent_sessions = []
+        self._agent_active_session_id = None
+        self._agent_session_switching = False
+        self._init_agent_chat_sessions()
+        self._refresh_agent_llm_status()
+
+        # ----- Sub-tab: Fleet Overview (default, left) -----
+        overview_page = QWidget()
+        overview_scroll = QScrollArea()
+        overview_scroll.setWidgetResizable(True)
+        overview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        overview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        overview_outer = QVBoxLayout(overview_page)
+        overview_outer.setContentsMargins(0, 0, 0, 0)
+        overview_outer.addWidget(overview_scroll)
+
         container_widget = QWidget()
         layout = QVBoxLayout(container_widget)
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Welcome section
+
         welcome_group = QGroupBox("Welcome")
         welcome_layout = QVBoxLayout()
         welcome_label = QLabel(f"Welcome {self.current_username}. You are logged in as: {self.current_role}")
@@ -7628,8 +9302,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
         welcome_layout.addWidget(welcome_label)
         welcome_group.setLayout(welcome_layout)
         layout.addWidget(welcome_group)
-        
-        # System status section
+
         status_group = QGroupBox("System Status")
         status_layout = QFormLayout()
         self.system_status_label = QLabel("System operational")
@@ -7659,7 +9332,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
         fleet_report_btn.clicked.connect(self.export_fleet_mission_report)
         fleet_layout.addWidget(fleet_report_btn)
         fleet_group.setLayout(fleet_layout)
-        layout.addWidget(fleet_group, 2)
+        layout.addWidget(fleet_group, 1)
 
         retrain_group = QGroupBox("Pending Retrain Signals")
         retrain_layout = QVBoxLayout()
@@ -7698,44 +9371,41 @@ class SecureAnomalyDetectionTool(QMainWindow):
         activity_group.setLayout(activity_layout)
         layout.addWidget(activity_group, 0)
 
-        # Load recent activity
         self.load_recent_activity()
         self.refresh_retrain_signals_panel()
+        self.refresh_draft_alerts_panel()
 
-        # Force table to update/repaint with new row heights
         self.activity_table.resizeRowsToContents()
         self.activity_table.update()
         self.activity_table.repaint()
 
-        # Quick actions section - responsive
         actions_group = QGroupBox("Quick Actions")
         actions_widget = QWidget()
         actions_layout = QHBoxLayout(actions_widget)
         actions_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         import_button = QPushButton("Open Data Import")
         import_button.clicked.connect(lambda: self.open_first_custom_tab(section_index=3))
         import_button.setMinimumWidth(80)
-        
+
         analyze_button = QPushButton("Open Analysis / ML")
         analyze_button.clicked.connect(lambda: self.open_first_custom_tab(section_index=2))
         analyze_button.setMinimumWidth(80)
-        
+
         report_button = QPushButton("Fleet Report")
         report_button.clicked.connect(self.export_fleet_mission_report)
         report_button.setMinimumWidth(100)
-        
+
         actions_layout.addWidget(import_button)
         actions_layout.addWidget(analyze_button)
         actions_layout.addWidget(report_button)
         actions_layout.addStretch()
-        
+
         actions_group_layout = QVBoxLayout()
         actions_group_layout.addWidget(actions_widget)
         actions_group.setLayout(actions_group_layout)
         layout.addWidget(actions_group)
-        
-        # Logout button
+
         logout_button = QPushButton("Logout")
         logout_button.setStyleSheet("""
             QPushButton {
@@ -7756,13 +9426,14 @@ class SecureAnomalyDetectionTool(QMainWindow):
         """)
         logout_button.clicked.connect(self.logout)
         layout.addWidget(logout_button)
-        
-        # Add stretch at the end
+
         layout.addStretch()
-        
-        # Set container widget and add to scroll area
-        scroll_area.setWidget(container_widget)
-        main_layout.addWidget(scroll_area)
+
+        overview_scroll.setWidget(container_widget)
+        # Order: Fleet Overview (default) → AI Assistant
+        self.home_subtabs.addTab(overview_page, "Fleet Overview")
+        self.home_subtabs.addTab(agent_page, "AI Assistant")
+        self.home_subtabs.setCurrentIndex(0)
         
         
     def setup_data_tab(self):
@@ -7781,6 +9452,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
 
     _TAB_DATA_IMPORT_HELPER_NAMES = (
         "browse_data_file", "load_data", "preprocess_data", "clean_data",
+        "browse_log_file", "load_log_file",
         "stop_data_import_monitoring", "update_visualization_features", "refresh_column_analysis",
         "update_feature_list", "on_preprocessing_finished",
     )
@@ -8719,7 +10391,9 @@ Alert sent to user: {username} ({user_data["role"]})
     _TAB_VISUALIZATION_HELPER_NAMES = (
         "plot_feature", "clear_plot", "export_plot", "plot_model_comparison", "plot_metrics",
         "update_visualization_features", "update_viz_model_info", "_apply_time_range_filter",
-        "_plot_time_series_with_anomalies", "_plot_anomaly_distribution", "_plot_correlation_heatmap",
+        "_sync_trained_models_for_viz", "_viz_reset_axes", "_viz_anomaly_scores_series",
+        "_plot_time_series_with_anomalies", "_plot_anomaly_distribution",
+        "_plot_metrics_anomaly_distribution", "_plot_correlation_heatmap",
         "_plot_statistical_summary", "_plot_anomaly_timeline", "_plot_error_metrics",
         "_plot_model_performance", "_plot_3d_surface", "_plot_3d_waterfall",
         "_plot_model_detection_counts", "_plot_model_agreement_matrix", "_plot_detection_overlap",
@@ -8746,242 +10420,294 @@ Alert sent to user: {username} ({user_data["role"]})
         from app.tabs.custom_tab.widget import build_legacy_panel_slots
 
         _build(host, parent_layout, slots=assert_panel_slots_complete(build_legacy_panel_slots(self)))
+    def _viz_reset_axes(self):
+        """Recreate 2D axes after fig.clear() (stale .axes breaks plot_metrics)."""
+        self.plot_canvas.fig.clear()
+        self.plot_canvas.axes = self.plot_canvas.fig.add_subplot(111)
+        return self.plot_canvas.axes
+
+    def _viz_anomaly_scores_series(self):
+        """Return Anomaly Score series from data/preprocessed, or None."""
+        dp = getattr(self, "data_processor", None)
+        if dp is None:
+            return None
+        for frame in (getattr(dp, "preprocessed_data", None), getattr(dp, "data", None)):
+            if isinstance(frame, pd.DataFrame) and "Anomaly Score" in frame.columns:
+                s = frame["Anomaly Score"].dropna()
+                if len(s) > 0:
+                    return s
+        return None
+
     def plot_metrics(self):
-        """Plot selected metrics visualization"""
+        """Plot selected metrics visualization (real model/data only — no fake 3D)."""
         try:
-            if not self.model or not hasattr(self.model, 'metrics'):
-                self.visualization_status_label.setText("No model metrics available")
-                return
-            
             metric_type = self.metric_type_combo.currentText()
             plot_type = self.plot_type_combo.currentText()
-            
-            # Clear previous plot
-            self.plot_canvas.fig.clear()
-            
-            if plot_type == "3D Surface":
-                self._plot_3d_surface(metric_type)
-            elif plot_type == "3D Waterfall":
-                self._plot_3d_waterfall(metric_type)
-            elif metric_type == "Error Metrics":
-                self._plot_error_metrics(plot_type)
-            elif metric_type == "Model Performance":
-                self._plot_model_performance(plot_type)
+
+            if plot_type in ("3D Surface", "3D Waterfall"):
+                scores = self._viz_anomaly_scores_series()
+                if scores is None:
+                    self.visualization_status_label.setText(
+                        "3D plots need Anomaly Score in data. Run Test/Predict first, or use Generate → Anomaly Score Distribution."
+                    )
+                    return
+                self.plot_canvas.fig.clear()
+                if plot_type == "3D Surface":
+                    self._plot_3d_surface(metric_type)
+                else:
+                    self._plot_3d_waterfall(metric_type)
             elif metric_type == "Anomaly Distribution":
-                self._plot_anomaly_distribution(plot_type)
-                
-            # Adjust layout and refresh
+                self._viz_reset_axes()
+                self._plot_metrics_anomaly_distribution(plot_type)
+            else:
+                if not self.model or not getattr(self.model, "metrics", None):
+                    self.visualization_status_label.setText(
+                        "No model metrics available. Train a model first."
+                    )
+                    return
+                self._viz_reset_axes()
+                if metric_type == "Error Metrics":
+                    self._plot_error_metrics(plot_type)
+                elif metric_type == "Model Performance":
+                    self._plot_model_performance(plot_type)
+
             self.plot_canvas.fig.tight_layout()
             self.plot_canvas.draw()
-            
+
         except Exception as e:
             logger.error(f"Error plotting metrics: {str(e)}")
             self.visualization_status_label.setText(f"Error plotting metrics: {str(e)}")
     
     def _plot_error_metrics(self, plot_type):
         """Plot error metrics visualization"""
-        if not hasattr(self.model, 'prediction_metrics'):
-            return
-        
-        metrics = self.model.prediction_metrics
+        ax = getattr(self.plot_canvas, "axes", None) or self._viz_reset_axes()
+        metrics = getattr(self.model, "prediction_metrics", None) or {}
         if not metrics:
+            # Fall back to model.metrics numeric fields
+            metrics = {
+                k: v
+                for k, v in (getattr(self.model, "metrics", None) or {}).items()
+                if isinstance(v, (int, float))
+            }
+        if not metrics:
+            ax.text(0.5, 0.5, "No error/prediction metrics on this model", ha="center", va="center")
+            self.visualization_status_label.setText("No error metrics available")
             return
-            
+
         if plot_type == "Line Plot":
-            if 'mean_score' in metrics and 'score_std' in metrics:
-                scores = np.array([metrics['mean_score']])
-                std = np.array([metrics['score_std']])
-                x = np.array([0])
-                
-                self.plot_canvas.axes.errorbar(x, scores, yerr=std, fmt='o-', capsize=5)
-                self.plot_canvas.axes.set_ylabel('Anomaly Score')
-                self.plot_canvas.axes.set_title('Error Metrics with Standard Deviation')
-                
+            if "mean_score" in metrics and "score_std" in metrics:
+                ax.errorbar(
+                    [0],
+                    [metrics["mean_score"]],
+                    yerr=[metrics["score_std"]],
+                    fmt="o-",
+                    capsize=5,
+                )
+                ax.set_ylabel("Anomaly Score")
+                ax.set_title("Error Metrics with Standard Deviation")
+            else:
+                keys = list(metrics.keys())[:12]
+                ax.plot(keys, [metrics[k] for k in keys], "o-")
+                ax.set_title("Error Metrics")
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
         elif plot_type == "Bar Chart":
-            error_metrics = {k: v for k, v in metrics.items() 
-                           if k in ['mean_score', 'min_score', 'max_score']}
-            
-            if error_metrics:
-                x = list(error_metrics.keys())
-                y = list(error_metrics.values())
-                
-                self.plot_canvas.axes.bar(x, y)
-                self.plot_canvas.axes.set_ylabel('Score Value')
-                self.plot_canvas.axes.set_title('Error Metrics Comparison')
-                plt.setp(self.plot_canvas.axes.xaxis.get_majorticklabels(), rotation=45)
+            error_metrics = {
+                k: v
+                for k, v in metrics.items()
+                if k in ("mean_score", "min_score", "max_score") or isinstance(v, (int, float))
+            }
+            keys = list(error_metrics.keys())[:12]
+            ax.bar(keys, [error_metrics[k] for k in keys])
+            ax.set_ylabel("Score Value")
+            ax.set_title("Error Metrics Comparison")
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+        else:
+            ax.text(
+                0.5,
+                0.5,
+                f"Plot type '{plot_type}' not supported for Error Metrics.\nUse Line Plot or Bar Chart.",
+                ha="center",
+                va="center",
+            )
+        self.visualization_status_label.setText(f"Error metrics ({plot_type})")
     
     def _plot_model_performance(self, plot_type):
         """Plot model performance metrics"""
-        if not hasattr(self.model, 'metrics'):
-            return
-            
-        metrics = self.model.metrics
+        ax = getattr(self.plot_canvas, "axes", None) or self._viz_reset_axes()
+        metrics = getattr(self.model, "metrics", None) or {}
         if not metrics:
+            ax.text(0.5, 0.5, "No performance metrics on this model", ha="center", va="center")
+            self.visualization_status_label.setText("No performance metrics available")
             return
-            
+
+        perf_metrics = {
+            k: v
+            for k, v in metrics.items()
+            if isinstance(v, (int, float)) and k not in ("training_time",)
+        }
+        if not perf_metrics:
+            ax.text(0.5, 0.5, "No numeric performance metrics", ha="center", va="center")
+            return
+
+        keys = list(perf_metrics.keys())
+        vals = [perf_metrics[k] for k in keys]
         if plot_type == "Line Plot":
-            if 'model_score' in metrics:
-                self.plot_canvas.axes.plot(['Model Score'], [metrics['model_score']], 'o-')
-                self.plot_canvas.axes.set_ylabel('Score')
-                self.plot_canvas.axes.set_title('Model Performance Score')
-                
+            ax.plot(keys, vals, "o-")
+            ax.set_ylabel("Value")
+            ax.set_title("Model Performance Score")
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
         elif plot_type == "Bar Chart":
-            perf_metrics = {k: v for k, v in metrics.items() 
-                          if isinstance(v, (int, float)) and k not in ['training_time']}
-            
-            if perf_metrics:
-                x = list(perf_metrics.keys())
-                y = list(perf_metrics.values())
-                
-                self.plot_canvas.axes.bar(x, y)
-                self.plot_canvas.axes.set_ylabel('Value')
-                self.plot_canvas.axes.set_title('Model Performance Metrics')
-                plt.setp(self.plot_canvas.axes.xaxis.get_majorticklabels(), rotation=45)
+            ax.bar(keys, vals)
+            ax.set_ylabel("Value")
+            ax.set_title("Model Performance Metrics")
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha="right")
+        elif plot_type == "Histogram":
+            ax.hist(vals, bins=min(10, max(3, len(vals))), alpha=0.75)
+            ax.set_title("Performance Metrics Distribution")
+        else:
+            ax.text(
+                0.5,
+                0.5,
+                f"Use Line/Bar/Histogram for Model Performance.\n'{plot_type}' needs Anomaly Score data.",
+                ha="center",
+                va="center",
+            )
+        self.visualization_status_label.setText(f"Model performance ({plot_type})")
     
-    def _plot_anomaly_distribution(self, plot_type):
-        """Plot anomaly distribution"""
-        # Check if data_processor and data exist and are valid DataFrames
-        if not hasattr(self.data_processor, 'data') or self.data_processor.data is None:
-            self.plot_canvas.axes.text(0.5, 0.5, 'No anomaly data available', 
-                                       ha='center', va='center', transform=self.plot_canvas.axes.transAxes)
+    def _plot_metrics_anomaly_distribution(self, plot_type):
+        """Metrics panel: histogram/box of Anomaly Score (distinct from Generate→distribution)."""
+        ax = getattr(self.plot_canvas, "axes", None) or self._viz_reset_axes()
+        scores = self._viz_anomaly_scores_series()
+        if scores is None:
+            ax.text(0.5, 0.5, "Anomaly Score not computed yet", ha="center", va="center")
+            self.visualization_status_label.setText("Anomaly Score not available — run Test/Predict first")
             return
-        
-        # Ensure data is a DataFrame
-        data = self.data_processor.data
-        if isinstance(data, str):
-            self.plot_canvas.axes.text(0.5, 0.5, 'Data not loaded yet', 
-                                       ha='center', va='center', transform=self.plot_canvas.axes.transAxes)
-            return
-        
-        # Check if 'Anomaly Score' column exists
-        if not hasattr(data, 'columns') or "Anomaly Score" not in data.columns:
-            self.plot_canvas.axes.text(0.5, 0.5, 'Anomaly Score not computed', 
-                                       ha='center', va='center', transform=self.plot_canvas.axes.transAxes)
-            return
-            
-        scores = data["Anomaly Score"].dropna()
-        
-        if plot_type == "Histogram":
-            self.plot_canvas.axes.hist(scores, bins=50, alpha=0.75)
-            self.plot_canvas.axes.set_xlabel('Anomaly Score')
-            self.plot_canvas.axes.set_ylabel('Frequency')
-            self.plot_canvas.axes.set_title('Distribution of Anomaly Scores')
-            
+
+        if plot_type in ("Histogram", "Line Plot", "Bar Chart"):
+            ax.hist(scores, bins=min(50, max(10, len(scores) // 20)), alpha=0.75)
+            ax.set_xlabel("Anomaly Score")
+            ax.set_ylabel("Frequency")
+            ax.set_title("Distribution of Anomaly Scores")
         elif plot_type == "Box Plot":
-            self.plot_canvas.axes.boxplot(scores)
-            self.plot_canvas.axes.set_ylabel('Anomaly Score')
-            self.plot_canvas.axes.set_title('Anomaly Score Distribution')
-            
-            # Add threshold line if available
-            if hasattr(self.model, 'reconstruction_error_threshold'):
-                threshold = self.model.reconstruction_error_threshold
-                self.plot_canvas.axes.axhline(y=threshold, color='r', linestyle='--', 
-                                            label='Anomaly Threshold')
-                self.plot_canvas.axes.legend()
+            ax.boxplot(scores)
+            ax.set_ylabel("Anomaly Score")
+            ax.set_title("Anomaly Score Distribution")
+            if hasattr(self, "model") and getattr(self.model, "reconstruction_error_threshold", None):
+                ax.axhline(
+                    y=self.model.reconstruction_error_threshold,
+                    color="r",
+                    linestyle="--",
+                    label="Anomaly Threshold",
+                )
+                ax.legend()
+        else:
+            ax.text(
+                0.5,
+                0.5,
+                f"For '{plot_type}' use Plot Metrics with 3D types,\nor Generate → Anomaly Score Distribution.",
+                ha="center",
+                va="center",
+            )
+            return
+        self.visualization_status_label.setText(
+            f"Anomaly score distribution: n={len(scores)}, mean={float(scores.mean()):.3f}"
+        )
     
     def _plot_3d_surface(self, metric_type):
-        """Plot 3D surface visualization of metrics"""
+        """Plot 3D surface from real Anomaly Score grid (no synthetic fallback)."""
         try:
-            ax = self.plot_canvas.fig.add_subplot(111, projection='3d')
-            
-            # Generate sample data for 3D surface
-            x = np.linspace(0, 10, 50)
-            y = np.linspace(0, 10, 50)
+            scores = self._viz_anomaly_scores_series()
+            if scores is None or len(scores) < 25:
+                ax = self.plot_canvas.fig.add_subplot(111)
+                ax.text(
+                    0.5,
+                    0.5,
+                    "Need at least 25 Anomaly Score points for 3D Surface",
+                    ha="center",
+                    va="center",
+                )
+                return
+
+            ax = self.plot_canvas.fig.add_subplot(111, projection="3d")
+            side = int(min(50, int(np.sqrt(len(scores)))))
+            need = side * side
+            z_flat = scores.values[:need]
+            if len(z_flat) < need:
+                ax_flat = self.plot_canvas.fig.add_subplot(111)
+                ax_flat.text(0.5, 0.5, "Not enough score points for grid", ha="center", va="center")
+                return
+            Z = np.asarray(z_flat, dtype=float).reshape(side, side)
+            x = np.arange(side)
+            y = np.arange(side)
             X, Y = np.meshgrid(x, y)
-            
-            if metric_type == "Error Metrics" and hasattr(self, 'data_processor') and hasattr(self.data_processor, 'data'):
-                # Use anomaly score as Z values
-                data = self.data_processor.data
-                if isinstance(data, pd.DataFrame) and "Anomaly Score" in data.columns:
-                    scores = data["Anomaly Score"].values[:2500]  # Limit to 2500 points
-                    if len(scores) >= 50 * 50:
-                        Z = scores[:2500].reshape(50, 50)
-                    else:
-                        # Generate based on available data
-                        Z = np.sin(X/2) * np.cos(Y/2) * np.std(scores)
-                else:
-                    Z = np.sin(X/2) * np.cos(Y/2)
-            elif metric_type == "Anomaly Distribution":
-                # 3D surface showing anomaly distribution
-                if hasattr(self.data_processor, 'data') and isinstance(self.data_processor.data, pd.DataFrame):
-                    if "Anomaly Score" in self.data_processor.data.columns:
-                        scores = self.data_processor.data["Anomaly Score"].values
-                        Z = (scores.mean() / (1 + np.abs(X - 5) * np.abs(Y - 5) / 50))
-                    else:
-                        Z = np.sin(X/2) * np.cos(Y/2)
-                else:
-                    Z = np.sin(X/2) * np.cos(Y/2)
-            else:
-                # Default 3D surface
-                Z = np.sin(X/2) * np.cos(Y/2)
-            
-            # Plot surface
-            surf = ax.plot_surface(X, Y, Z, cmap='viridis', alpha=0.8, edgecolor='none')
-            
-            ax.set_xlabel('X Axis')
-            ax.set_ylabel('Y Axis')
-            ax.set_zlabel('Score Value')
-            ax.set_title(f'3D Surface: {metric_type}')
-            
-            # Add colorbar
+            surf = ax.plot_surface(X, Y, Z, cmap="viridis", alpha=0.85, edgecolor="none")
+            ax.set_xlabel("Index X")
+            ax.set_ylabel("Index Y")
+            ax.set_zlabel("Anomaly Score")
+            ax.set_title(f"3D Surface: {metric_type} (from Anomaly Score)")
             self.plot_canvas.fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
-            
+            self.visualization_status_label.setText(
+                f"3D surface from {need} anomaly scores ({side}×{side})"
+            )
         except Exception as e:
             logger.error(f"Error plotting 3D surface: {e}")
             ax = self.plot_canvas.fig.add_subplot(111)
-            ax.text(0.5, 0.5, f'Error: {str(e)}', ha='center', va='center')
+            ax.text(0.5, 0.5, f"Error: {str(e)}", ha="center", va="center")
     
     def _plot_3d_waterfall(self, metric_type):
-        """Plot 3D waterfall visualization"""
+        """Plot 3D bars from rolling Anomaly Score windows (no synthetic fallback)."""
         try:
-            ax = self.plot_canvas.fig.add_subplot(111, projection='3d')
-            
-            # Generate waterfall data (stacked bar-like 3D effect)
-            x = np.arange(10)
-            y = np.arange(10)
-            X, Y = np.meshgrid(x, y)
-            
-            if metric_type == "Error Metrics" and hasattr(self, 'data_processor'):
-                # Use rolling metrics as waterfall
-                if hasattr(self.data_processor, 'data') and isinstance(self.data_processor.data, pd.DataFrame):
-                    if "Anomaly Score" in self.data_processor.data.columns:
-                        scores = self.data_processor.data["Anomaly Score"].values
-                        # Create rolling window effect
-                        window_size = len(scores) // 100
-                        if window_size > 0:
-                            rolled = [np.mean(scores[i:i+window_size]) for i in range(0, min(len(scores), 1000), window_size)]
-                            if len(rolled) >= 10:
-                                Z = np.tile(rolled[:10], (10, 1)).T
-                            else:
-                                Z = np.abs(np.sin(X/2) * np.cos(Y/2) * 2)
-                        else:
-                            Z = np.abs(np.sin(X/2) * np.cos(Y/2) * 2)
-                    else:
-                        Z = np.abs(np.sin(X/2) * np.cos(Y/2) * 2)
-                else:
-                    Z = np.abs(np.sin(X/2) * np.cos(Y/2) * 2)
-            else:
-                Z = np.abs(np.sin(X/2) * np.cos(Y/2) * 2)
-            
-            # Plot waterfall (using bar3d for 3D bar effect)
-            xpos, ypos = np.meshgrid(np.arange(X.shape[1]), np.arange(X.shape[0]))
+            scores = self._viz_anomaly_scores_series()
+            if scores is None or len(scores) < 20:
+                ax = self.plot_canvas.fig.add_subplot(111)
+                ax.text(
+                    0.5,
+                    0.5,
+                    "Need Anomaly Score data for 3D Waterfall.\nRun Test/Predict first.",
+                    ha="center",
+                    va="center",
+                )
+                self.visualization_status_label.setText("3D Waterfall blocked — no Anomaly Score")
+                return
+
+            ax = self.plot_canvas.fig.add_subplot(111, projection="3d")
+            vals = scores.values.astype(float)
+            n_bins = 10
+            chunk = max(1, len(vals) // n_bins)
+            rolled = [
+                float(np.mean(vals[i : i + chunk]))
+                for i in range(0, min(len(vals), chunk * n_bins), chunk)
+            ][:n_bins]
+            while len(rolled) < n_bins:
+                rolled.append(rolled[-1] if rolled else 0.0)
+            Z = np.tile(np.asarray(rolled), (n_bins, 1)).T
+            xpos, ypos = np.meshgrid(np.arange(n_bins), np.arange(n_bins))
             zpos = np.zeros_like(Z)
-            dx = dy = 0.8
             dz = Z.flatten()
-            
-            colors = plt.cm.viridis(Z.flatten() / Z.max())
-            ax.bar3d(xpos.flatten(), ypos.flatten(), zpos.flatten(), dx, dy, dz, 
-                    color=colors, zsort='average', alpha=0.8)
-            
-            ax.set_xlabel('X Position')
-            ax.set_ylabel('Y Position')
-            ax.set_zlabel('Height/Score')
-            ax.set_title(f'3D Waterfall: {metric_type}')
-            
+            zmax = float(np.max(dz)) if np.max(dz) > 0 else 1.0
+            colors = plt.cm.viridis(dz / zmax)
+            ax.bar3d(
+                xpos.flatten(),
+                ypos.flatten(),
+                zpos.flatten(),
+                0.8,
+                0.8,
+                dz,
+                color=colors,
+                zsort="average",
+                alpha=0.85,
+            )
+            ax.set_xlabel("Window")
+            ax.set_ylabel("Series")
+            ax.set_zlabel("Mean Score")
+            ax.set_title(f"3D Waterfall: {metric_type} (rolling Anomaly Score)")
+            self.visualization_status_label.setText(
+                f"3D waterfall from {len(vals)} scores → {n_bins} rolling windows"
+            )
         except Exception as e:
             logger.error(f"Error plotting 3D waterfall: {e}")
             ax = self.plot_canvas.fig.add_subplot(111)
-            ax.text(0.5, 0.5, f'Error: {str(e)}', ha='center', va='center')
+            ax.text(0.5, 0.5, f"Error: {str(e)}", ha="center", va="center")
     
     def setup_admin_tab(self):
         # Main layout with scroll area for responsive design
@@ -13163,6 +14889,48 @@ Alert sent to user: {username} ({user_data["role"]})
         if file_name:
             self.file_path_input.setText(file_name)
             self.data_status_label.setText(f"Selected file: {file_name}")
+
+    def browse_log_file(self):
+        """Select a mission/event log file for M-LLM ingest (Data Import)."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Log File",
+            "",
+            "Log files (*.log *.txt);;All files (*.*)",
+        )
+        if not path:
+            return
+        if hasattr(self, "log_path_input"):
+            self.log_path_input.setText(path)
+        if hasattr(self, "config"):
+            self.config["log_file"] = path
+            parent = getattr(self, "parent_window", None)
+            tab_id = getattr(self, "tab_id", None)
+            if parent and tab_id and hasattr(parent, "tab_config_manager"):
+                parent.tab_config_manager.add_config(tab_id, self.config)
+
+    def load_log_file(self):
+        """Ingest .log/.txt into LogMonitor when host is a custom tab."""
+        # Prefer CustomMonitoringTab native implementation when bound that way
+        from app.tabs.custom_tab.widget import CustomMonitoringTab
+
+        if isinstance(self, CustomMonitoringTab):
+            return CustomMonitoringTab.load_log_file(self)
+        path = ""
+        if hasattr(self, "log_path_input"):
+            path = self.log_path_input.text().strip()
+        if not path:
+            QMessageBox.warning(self, "Load Logs", "Please select a log file first.")
+            return
+        tab_id = getattr(self, "tab_id", None)
+        if not tab_id:
+            QMessageBox.information(
+                self,
+                "Load Logs",
+                "Log ingest is available on custom monitoring tabs (Data Import page).",
+            )
+            return
+        return CustomMonitoringTab.load_log_file(self)
     
     def browse_auto_folder(self):
         """Browse for folder containing data files to auto-load from"""
@@ -14166,6 +15934,14 @@ Alert sent to user: {username} ({user_data["role"]})
             logger.error(f"Traceback: {traceback.format_exc()}")
             self.analysis_status_label.setText(error_msg)
     
+    def _on_train_log_chunk(self, text: str) -> None:
+        """Mirror Keras stdout into the Analysis Training Console."""
+        from app.ui.training_console import append_console_chunk
+
+        console = getattr(self, "training_console", None)
+        if console is not None:
+            append_console_chunk(console, text)
+
     def _train_next_model(self):
         """Train the next model in the queue"""
         if self.current_training_index >= len(self.models_to_train):
@@ -14194,6 +15970,12 @@ Alert sent to user: {username} ({user_data["role"]})
         # Connect signals
         self.worker.finished.connect(self.on_single_model_trained)
         self.worker.progress.connect(lambda p: self.status_bar.showMessage(f"{progress_text} - {p}%"))
+        self.worker.log_chunk.connect(self._on_train_log_chunk)
+        from app.ui.training_console import append_training_header, clear_training_console
+
+        if self.current_training_index == 0:
+            clear_training_console(self)
+        append_training_header(self, progress_text)
         
         # Disable UI elements during training
         self.model_list_widget.setEnabled(False)
@@ -15466,6 +17248,21 @@ Alert sent to user: {username} ({user_data["role"]})
                     
                     # Log the exit
                     logger.info("Application exit initiated after stopping monitoring")
+
+                    try:
+                        loop = getattr(self, "agent_loop", None)
+                        if loop is not None:
+                            loop.stop()
+                            self.agent_loop = None
+                    except Exception:
+                        pass
+                    try:
+                        from app.agent import stop_agent_bridge
+
+                        stop_agent_bridge()
+                    except Exception:
+                        pass
+                    self.agent_bridge = None
                     
                     # Close the application
                     QApplication.quit()
@@ -15670,14 +17467,41 @@ Alert sent to user: {username} ({user_data["role"]})
         """Apply time range filtering to data"""
         if time_range == "All Data":
             return data
-        elif time_range == "Last 100 Points":
+        if time_range == "Last 100 Points":
             return data.tail(100)
-        elif time_range == "Last 500 Points":
+        if time_range == "Last 500 Points":
             return data.tail(500)
-        elif time_range == "Last 1000 Points":
+        if time_range == "Last 1000 Points":
             return data.tail(1000)
-        else:
+        if time_range == "Custom Range":
+            # No date picker wired yet — keep full series and note in status
+            if hasattr(self, "visualization_status_label"):
+                self.visualization_status_label.setText(
+                    "Custom Range not configured — showing All Data. Use Last N Points for now."
+                )
             return data
+        return data
+
+    def _sync_trained_models_for_viz(self):
+        """Map custom-tab ``self.models`` into ``trained_models`` for comparison plots."""
+        tab_models = getattr(self, "models", None)
+        if not isinstance(tab_models, dict) or not tab_models:
+            return
+        synced = {}
+        for mid, model in tab_models.items():
+            if model is None:
+                continue
+            base = str(getattr(model, "model_type", None) or mid)[:48]
+            name = base
+            n = 2
+            while name in synced:
+                name = f"{base} ({n})"
+                n += 1
+            synced[name] = model
+        if synced:
+            self.trained_models = synced
+            if self.model is None:
+                self.model = next(iter(synced.values()))
     
     def _plot_time_series_with_anomalies(self, data, feature):
         """Plot clean time series with anomalies"""
@@ -15695,17 +17519,31 @@ Alert sent to user: {username} ({user_data["role"]})
             x = np.arange(len(data))
             x_label = "Data Points"
         
-        # Plot main data line
-        line_style = '-' if not self.smooth_lines_check.isChecked() else '-'
-        linewidth = 1.5 if self.smooth_lines_check.isChecked() else 1.0
-        alpha = 0.8 if self.smooth_lines_check.isChecked() else 0.7
-        
-        ax.plot(x, data[feature], 
-               label=feature, 
-               color='#1f77b4', 
-               linewidth=linewidth, 
-               alpha=alpha,
-               linestyle=line_style)
+        y = pd.to_numeric(data[feature], errors="coerce")
+        smooth = bool(
+            hasattr(self, "smooth_lines_check") and self.smooth_lines_check.isChecked()
+        )
+        if smooth and len(y) >= 5:
+            window = max(3, min(21, len(y) // 25 * 2 + 1))
+            y_plot = y.rolling(window=window, center=True, min_periods=1).mean()
+            label = f"{feature} (smoothed)"
+            linewidth = 1.8
+            alpha = 0.9
+        else:
+            y_plot = y
+            label = feature
+            linewidth = 1.0
+            alpha = 0.75
+
+        ax.plot(
+            x,
+            y_plot,
+            label=label,
+            color="#1f77b4",
+            linewidth=linewidth,
+            alpha=alpha,
+            linestyle="-",
+        )
         
         # Add anomalies if requested and available
         if self.highlight_anomalies_check.isChecked() and "Anomaly" in data.columns:
@@ -15734,14 +17572,12 @@ Alert sent to user: {username} ({user_data["role"]})
                 else:
                     x_values = np.asarray(x)
                 
-                # Extract anomaly indices properly
                 if isinstance(anomaly_mask, pd.Series):
                     mask_array = anomaly_mask.values
-                    feature_values = data[feature].values if isinstance(data[feature], pd.Series) else np.asarray(data[feature])
                 else:
                     mask_array = np.asarray(anomaly_mask)
-                    feature_values = np.asarray(data[feature])
-                
+                # Scatter on raw feature values (not smoothed) so anomalies stay accurate
+                feature_values = y.values if hasattr(y, "values") else np.asarray(y)
                 anomaly_x = x_values[mask_array]
                 anomaly_y = feature_values[mask_array]
                 
@@ -15966,29 +17802,45 @@ Alert sent to user: {username} ({user_data["role"]})
     def plot_model_comparison(self):
         """Plot comparison of multiple trained models"""
         try:
-            # Check if we have multiple trained models
-            if not hasattr(self, 'trained_models') or not self.trained_models:
-                self.visualization_status_label.setText("No trained models available for comparison")
+            self._sync_trained_models_for_viz()
+            self.update_viz_model_info()
+
+            if not getattr(self, "trained_models", None):
+                self.visualization_status_label.setText(
+                    "No trained models available for comparison. Train models on this tab first."
+                )
                 return
-            
-            # Get valid models
-            valid_models = {name: model for name, model in self.trained_models.items() if model is not None}
-            
-            if len(valid_models) == 0:
+
+            valid_models = {
+                name: model
+                for name, model in self.trained_models.items()
+                if model is not None
+            }
+            if not valid_models:
                 self.visualization_status_label.setText("No valid trained models found")
                 return
-            
-            # Get data
-            data = self.data_processor.preprocessed_data if self.data_processor.preprocessed_data is not None else self.data_processor.data
-            if data is None or "Anomaly" not in data.columns:
-                self.visualization_status_label.setText("No anomaly detection results available. Please run prediction first.")
+
+            data = (
+                self.data_processor.preprocessed_data
+                if self.data_processor.preprocessed_data is not None
+                else self.data_processor.data
+            )
+            if data is None:
+                self.visualization_status_label.setText("No data loaded for comparison")
                 return
-            
+            if "Anomaly" not in data.columns and "Anomaly Score" not in data.columns:
+                self.visualization_status_label.setText(
+                    "No anomaly results yet. Use Test Models / Predict before Compare Models."
+                )
+                return
+            # Ensure Anomaly column exists for count/agreement helpers
+            if "Anomaly" not in data.columns and "Anomaly Score" in data.columns:
+                data = data.copy()
+                data["Anomaly"] = (pd.to_numeric(data["Anomaly Score"], errors="coerce") > 0.5).astype(int)
+
             comparison_type = self.viz_comparison_type.currentText()
-            
-            # Clear previous plot
             self.plot_canvas.fig.clear()
-            
+
             if comparison_type == "Model Detection Counts":
                 self._plot_model_detection_counts(valid_models, data)
             elif comparison_type == "Model Agreement Matrix":
@@ -16003,10 +17855,10 @@ Alert sent to user: {username} ({user_data["role"]})
                 self._plot_confidence_comparison(valid_models, data)
             elif comparison_type == "Performance Metrics":
                 self._plot_performance_metrics(valid_models, data)
-            
+
             self.plot_canvas.fig.tight_layout()
             self.plot_canvas.draw()
-            
+
         except Exception as e:
             logger.error(f"Error in plot_model_comparison: {str(e)}")
             self.visualization_status_label.setText(f"Error comparing models: {str(e)}")
@@ -16639,6 +18491,8 @@ Alert sent to user: {username} ({user_data["role"]})
         try:
             if not hasattr(self, 'viz_model_info_label'):
                 return
+
+            self._sync_trained_models_for_viz()
             
             if hasattr(self, 'trained_models') and self.trained_models:
                 valid_models = {name: model for name, model in self.trained_models.items() if model is not None}
@@ -17059,6 +18913,12 @@ Alert sent to user: {username} ({user_data["role"]})
             )
             if can_manage_users:
                 self.tabs.addTab(self.admin_tab, "Administration")
+
+            # Re-add custom monitoring tabs after permission rebuild
+            for tab_id, custom_tab in list(getattr(self, "custom_tabs", {}).items()):
+                title = getattr(custom_tab, "config", {}).get("title") or tab_id
+                if self.tabs.indexOf(custom_tab) < 0:
+                    self.tabs.addTab(custom_tab, title)
 
             self._hide_primary_tab_bar_entries()
                 
@@ -17783,6 +19643,58 @@ class TabConfigurationDialog(QDialog):
         ops_group.setLayout(ops_layout)
         layout.addWidget(ops_group)
 
+        # Mission Modes (FSM)
+        from app.models.fsm import DEFAULT_MISSION_MODES, ensure_fsm_fields
+
+        mission_group = QGroupBox("Mission Modes")
+        mission_layout = QVBoxLayout()
+        mission_hint = QLabel(
+            "Threshold scale widens (e.g. eclipse 1.5) or tightens (safe_mode 0.5) "
+            "OBS / fusion anomaly limits for the active operating regime."
+        )
+        mission_hint.setWordWrap(True)
+        mission_layout.addWidget(mission_hint)
+
+        cfg_for_modes = ensure_fsm_fields(dict(self.existing_config or {}))
+        saved_modes = {
+            str(m.get("name", "")).lower(): m for m in (cfg_for_modes.get("mission_modes") or [])
+        }
+        self.mission_mode_scale_spins = {}
+        for default_mode in DEFAULT_MISSION_MODES:
+            name = default_mode["name"]
+            saved = saved_modes.get(name, default_mode)
+            row = QHBoxLayout()
+            row.addWidget(QLabel(f"{name.title()}:"))
+            spin = QDoubleSpinBox()
+            spin.setRange(0.1, 5.0)
+            spin.setSingleStep(0.1)
+            spin.setDecimals(2)
+            try:
+                spin.setValue(float(saved.get("threshold_scale", default_mode["threshold_scale"])))
+            except (TypeError, ValueError):
+                spin.setValue(float(default_mode["threshold_scale"]))
+            spin.setToolTip(str(saved.get("description") or default_mode.get("description") or ""))
+            self.mission_mode_scale_spins[name] = spin
+            row.addWidget(QLabel("threshold_scale"))
+            row.addWidget(spin)
+            row.addStretch()
+            mission_layout.addLayout(row)
+
+        current_row = QHBoxLayout()
+        current_row.addWidget(QLabel("Current mode:"))
+        self.current_mission_mode_combo = QComboBox()
+        for default_mode in DEFAULT_MISSION_MODES:
+            self.current_mission_mode_combo.addItem(default_mode["name"])
+        current_name = str(cfg_for_modes.get("current_mission_mode") or "nominal")
+        idx = self.current_mission_mode_combo.findText(current_name)
+        if idx >= 0:
+            self.current_mission_mode_combo.setCurrentIndex(idx)
+        current_row.addWidget(self.current_mission_mode_combo)
+        current_row.addStretch()
+        mission_layout.addLayout(current_row)
+        mission_group.setLayout(mission_layout)
+        layout.addWidget(mission_group)
+
         # Email Alert Settings
         email_alert_group = QGroupBox("Email Alert Configuration")
         email_alert_layout = QVBoxLayout()
@@ -18254,7 +20166,27 @@ class TabConfigurationDialog(QDialog):
             'created_at': datetime.datetime.now().isoformat() if not self.existing_config else self.existing_config.get('created_at'),
             'updated_at': datetime.datetime.now().isoformat()
         }
-        
+
+        from app.models.fsm import DEFAULT_MISSION_MODES, ensure_fsm_fields
+
+        mission_modes = []
+        for default_mode in DEFAULT_MISSION_MODES:
+            name = default_mode["name"]
+            spin = self.mission_mode_scale_spins.get(name)
+            scale = float(spin.value()) if spin is not None else float(default_mode["threshold_scale"])
+            mission_modes.append(
+                {
+                    "name": name,
+                    "threshold_scale": scale,
+                    "expected_deviation_multiplier": scale,
+                    "description": default_mode.get("description", ""),
+                    "expected_patterns": {},
+                }
+            )
+        self.config["mission_modes"] = mission_modes
+        self.config["current_mission_mode"] = self.current_mission_mode_combo.currentText()
+        ensure_fsm_fields(self.config)
+
         self.accept()
 
 

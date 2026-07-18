@@ -19,6 +19,7 @@ from app.models.anomaly_engine import AnomalyModel
 from app.models.drift import DriftDetector
 from app.models.forecast import estimate_ttf_hours, short_forecast
 from app.models.fusion import FusionEngine
+from app.models.fsm import apply_threshold_scale, ensure_fsm_fields, resolve_current_mode
 from app.models.model_store import ModelStore
 from app.monitoring.obs_limits import evaluate_obs_limits
 
@@ -72,7 +73,7 @@ class TabRuntimeState:
 
     def __init__(self, tab_id: str, config: dict[str, Any], data_dir: Path | None = None):
         self.tab_id = tab_id
-        self.config = config
+        self.config = ensure_fsm_fields(dict(config or {}))
         self.data_dir = Path(data_dir) if data_dir else Path("data")
 
         self.dataframe: pd.DataFrame | None = None
@@ -80,7 +81,7 @@ class TabRuntimeState:
         self.watched_mtime: float | None = None
         self.monitoring_active = False
         self.watch_status = "Idle"
-        self.obs_result: dict[str, Any] = {"ok": True, "violations": []}
+        self.obs_result: dict[str, Any] = {"ok": True, "violations": [], "mode_normal": []}
 
         self.models: dict[str, AnomalyModel] = {}
         self.model_store = ModelStore(self.data_dir, tab_id)
@@ -144,7 +145,12 @@ class TabRuntimeState:
         self.dataframe = df
         self.watched_path = loaded.source_path
         self.watched_mtime = loaded.source_mtime
-        self.obs_result = evaluate_obs_limits(df)
+        mode = resolve_current_mode(self.config)
+        self.obs_result = evaluate_obs_limits(
+            df,
+            threshold_scale=mode.threshold_scale,
+            mission_mode=mode.name,
+        )
         self.watch_status = "OK" if self.obs_result.get("ok", True) else "OBS Violation"
         self._publish_snapshot()
         return True, None
@@ -232,7 +238,12 @@ class TabRuntimeState:
             result["error"] = "No data available"
             return result
 
-        self.obs_result = evaluate_obs_limits(self.dataframe)
+        mode = resolve_current_mode(self.config)
+        self.obs_result = evaluate_obs_limits(
+            self.dataframe,
+            threshold_scale=mode.threshold_scale,
+            mission_mode=mode.name,
+        )
 
         feature_df = self._feature_frame()
         if feature_df.empty:
@@ -279,7 +290,12 @@ class TabRuntimeState:
             return result
 
         fused = self.fusion.fuse(model_scores)
-        threshold = self.fusion.adaptive_threshold(fused)
+        threshold = apply_threshold_scale(
+            self.fusion.adaptive_threshold(fused),
+            mode.threshold_scale,
+            lo=self.fusion.threshold_min,
+            hi=self.fusion.threshold_max,
+        )
         health_state, is_warning, is_critical = self.fusion.classify(fused, threshold)
         xai = self.fusion.build_xai_reasons(feature_df, fused, threshold, drift_result, model_scores)
         ttf = estimate_ttf_hours(self.fusion.score_history, threshold)

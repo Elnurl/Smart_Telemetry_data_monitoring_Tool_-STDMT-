@@ -34,4 +34,6 @@ def test_evaluate_obs_limits_detects_violation():
 
 def test_evaluate_obs_limits_empty_data_is_ok():
     result = evaluate_obs_limits(pd.DataFrame(), rules=[])
-    assert result == {"ok": True, "violations": []}
+    assert result["ok"] is True
+    assert result["violations"] == []
+    assert result.get("mode_normal") == []
