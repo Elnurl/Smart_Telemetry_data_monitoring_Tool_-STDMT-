@@ -8,14 +8,53 @@ Direct train / email / config apply remain blocked until human approval
 from __future__ import annotations
 
 import logging
+import math
 import threading
+import uuid
+import datetime
+from contextlib import contextmanager
+from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Iterator, Optional, Protocol
 
 logger = logging.getLogger("STDMS.Agent.Bridge")
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 8765
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_local_data_path(file_path: str, extra_root: str = "") -> Path:
+    """Resolve a local file path and reject path-traversal / non-local targets."""
+    raw = str(file_path or "").strip()
+    if not raw or "\x00" in raw:
+        raise ValueError("file_path is required")
+    candidate = Path(raw).expanduser()
+    try:
+        resolved = candidate.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("file_path could not be resolved") from exc
+    if not resolved.exists() or not resolved.is_file():
+        raise FileNotFoundError(raw)
+    roots = [Path.cwd().resolve()]
+    data_root = (Path.cwd() / "data").resolve()
+    roots.append(data_root)
+    extra = str(extra_root or "").strip()
+    if extra:
+        try:
+            roots.append(Path(extra).expanduser().resolve())
+        except (OSError, RuntimeError):
+            pass
+    if not any(_is_under(resolved, root) for root in roots):
+        raise ValueError("file_path must stay under the workspace or the tab data folder")
+    return resolved
 
 # Process-wide handle so the FastAPI app can reach the live tool window.
 _host_lock = threading.RLock()
@@ -32,6 +71,7 @@ class AgentBridgeContext:
     runner: Any
     server: Any
     allow_llm: bool = False
+    api_token: str = ""
     host: str = _DEFAULT_HOST
     port: int = _DEFAULT_PORT
 
@@ -47,6 +87,9 @@ class ToolHost(Protocol):
         ...
 
     def get_snapshot(self, tab_id: str) -> Optional[dict[str, Any]]:
+        ...
+
+    def get_tab_definition(self, tab_id: str) -> Optional[dict[str, Any]]:
         ...
 
     def get_history(self, tab_id: str, n: int = 50) -> list[dict[str, Any]]:
@@ -95,6 +138,94 @@ class ToolHost(Protocol):
     def get_model_metrics(self, tab_id: str, model_id: str) -> dict[str, Any]:
         ...
 
+    def create_tab(self, config: dict[str, Any], *, requested_by: str = "api") -> dict[str, Any]:
+        ...
+
+    def update_tab(
+        self,
+        tab_id: str,
+        updates: dict[str, Any],
+        *,
+        requested_by: str = "api",
+    ) -> dict[str, Any]:
+        ...
+
+    def delete_tab(self, tab_id: str, *, requested_by: str = "api") -> dict[str, Any]:
+        ...
+
+    def train_tab(
+        self,
+        tab_id: str,
+        *,
+        model_id: Optional[str] = None,
+        requested_by: str = "api",
+    ) -> dict[str, Any]:
+        ...
+
+    def get_operation(self, operation_id: str) -> Optional[dict[str, Any]]:
+        ...
+
+    def get_tab_data_schema(self, tab_id: str) -> dict[str, Any]:
+        ...
+
+    def get_tab_data_preview(self, tab_id: str, limit: int = 50, *, head: bool = False) -> dict[str, Any]:
+        ...
+
+    def start_tab(self, tab_id: str, *, requested_by: str = "api") -> dict[str, Any]:
+        ...
+
+    def stop_tab(self, tab_id: str, *, requested_by: str = "api") -> dict[str, Any]:
+        ...
+
+    def get_tab_pipeline_metrics(self, tab_id: str, limit: int = 50) -> dict[str, Any]:
+        ...
+
+    def load_tab_data(
+        self,
+        tab_id: str,
+        *,
+        file_path: str,
+        file_type: str = "csv",
+        requested_by: str = "api",
+    ) -> dict[str, Any]:
+        ...
+
+    def get_registry_models(self, tab_id: str, limit: int = 20) -> dict[str, Any]:
+        ...
+
+
+class _QtOperationDispatcher:
+    """Queue Python callables on the Qt GUI thread when Qt is running."""
+
+    def __init__(self) -> None:
+        self._qt_object: Any = None
+        try:
+            from PyQt5.QtCore import QCoreApplication, QObject, pyqtSignal
+
+            if QCoreApplication.instance() is None:
+                return
+
+            class _Dispatcher(QObject):
+                invoke = pyqtSignal(object)
+
+                def __init__(self):
+                    super().__init__()
+                    self.invoke.connect(self._run)
+
+                @staticmethod
+                def _run(callback):
+                    callback()
+
+            self._qt_object = _Dispatcher()
+        except Exception as exc:
+            logger.debug("Qt operation dispatcher unavailable: %s", exc)
+
+    def submit(self, callback) -> None:
+        if self._qt_object is None:
+            callback()
+            return
+        self._qt_object.invoke.emit(callback)
+
 
 class MainWindowToolHost:
     """Adapter over SecureAnomalyDetectionTool.custom_tabs."""
@@ -102,6 +233,23 @@ class MainWindowToolHost:
     def __init__(self, main_window: Any):
         self._window = main_window
         self._lock = threading.RLock()
+        self._operations: dict[str, dict[str, Any]] = {}
+        self._dispatcher = _QtOperationDispatcher()
+
+    @contextmanager
+    def as_operator(self, username: str) -> Iterator[None]:
+        """Temporarily apply the API caller's identity to STDMS RBAC checks."""
+        window = self._window
+        previous = getattr(window, "current_username", None)
+        try:
+            if username and username != "api":
+                window.current_username = username
+            yield
+        finally:
+            try:
+                window.current_username = previous
+            except Exception:
+                pass
 
     def list_tabs(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -124,6 +272,38 @@ class MainWindowToolHost:
             if widget is None:
                 return None
             return self._safe_snapshot(widget, tab_id)
+
+    def get_tab_definition(self, tab_id: str) -> Optional[dict[str, Any]]:
+        """Return a client-safe tab config for future UI/gRPC clients."""
+        with self._lock:
+            widget = self._get_widget(tab_id)
+            if widget is None:
+                return None
+            config = dict(getattr(widget, "config", None) or {})
+
+        def _safe(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    str(key): (
+                        "***"
+                        if any(
+                            marker in str(key).lower()
+                            for marker in ("password", "secret", "token", "api_key")
+                        )
+                        else _safe(item)
+                    )
+                    for key, item in value.items()
+                }
+            if isinstance(value, (list, tuple)):
+                return [_safe(item) for item in value]
+            return self._serialize_metric_value(value)
+
+        return {
+            "tab_id": tab_id,
+            "title": self._tab_title(widget, tab_id),
+            "config": _safe(config),
+            "snapshot": self._safe_snapshot(widget, tab_id),
+        }
 
     def get_history(self, tab_id: str, n: int = 50) -> list[dict[str, Any]]:
         n = max(1, min(int(n), 500))
@@ -316,6 +496,8 @@ class MainWindowToolHost:
     @staticmethod
     def _serialize_metric_value(value: Any) -> Any:
         if value is None or isinstance(value, (bool, int, float, str)):
+            if isinstance(value, float) and not math.isfinite(value):
+                return None
             return value
         if isinstance(value, dict):
             return {str(k): MainWindowToolHost._serialize_metric_value(v) for k, v in value.items()}
@@ -325,6 +507,456 @@ class MainWindowToolHost:
             return float(value)
         except Exception:
             return str(value)
+
+    def _authorized(self, permission: str, resource: str) -> bool:
+        """Use the signed-in STDMS operator's existing RBAC when available."""
+        service = getattr(self._window, "service_layer", None)
+        username = getattr(self._window, "current_username", None)
+        if service is None or not hasattr(service, "authorize"):
+            return True
+        if not username:
+            return False
+        try:
+            return bool(service.authorize(username, permission, resource=resource))
+        except Exception as exc:
+            logger.warning("ToolHost authorization failed for %s: %s", permission, exc)
+            return False
+
+    def _submit_operation(self, kind: str, callback, *, requested_by: str) -> dict[str, Any]:
+        operation_id = str(uuid.uuid4())
+        operation = {
+            "operation_id": operation_id,
+            "kind": kind,
+            "status": "queued",
+            "requested_by": str(requested_by or "api")[:100],
+            "result": None,
+            "error": None,
+        }
+        with self._lock:
+            self._operations[operation_id] = operation
+
+        def _run() -> None:
+            with self._lock:
+                operation["status"] = "running"
+            try:
+                result = callback()
+                with self._lock:
+                    operation["status"] = "completed"
+                    operation["result"] = self._serialize_metric_value(result)
+            except Exception as exc:
+                logger.exception("ToolHost operation %s failed", operation_id)
+                with self._lock:
+                    operation["status"] = "failed"
+                    operation["error"] = str(exc)[:1000]
+
+        self._dispatcher.submit(_run)
+        return {
+            "ok": True,
+            "accepted": True,
+            "operation_id": operation_id,
+            "kind": kind,
+            "status": operation["status"],
+        }
+
+    def get_operation(self, operation_id: str) -> Optional[dict[str, Any]]:
+        with self._lock:
+            operation = self._operations.get(str(operation_id))
+            return dict(operation) if operation is not None else None
+
+    def create_tab(self, config: dict[str, Any], *, requested_by: str = "api") -> dict[str, Any]:
+        if not self._authorized("create_tab", "*") and not self._authorized(
+            "manage_users", "admin/users"
+        ):
+            return {"ok": False, "status": "forbidden", "error": "permission_denied"}
+        if not isinstance(config, dict):
+            return {"ok": False, "status": "invalid_config", "error": "config must be an object"}
+        clean = dict(config)
+        title = str(clean.get("title") or "").strip()
+        if not title:
+            return {"ok": False, "status": "invalid_config", "error": "title is required"}
+        clean["title"] = title[:200]
+
+        def _create():
+            create = getattr(self._window, "_create_custom_tab_from_config", None)
+            if not callable(create):
+                raise RuntimeError("create_tab_unsupported")
+            tab_id = create(clean)
+            return {"tab_id": tab_id, "title": clean["title"]}
+
+        return self._submit_operation("create_tab", _create, requested_by=requested_by)
+
+    def update_tab(
+        self,
+        tab_id: str,
+        updates: dict[str, Any],
+        *,
+        requested_by: str = "api",
+    ) -> dict[str, Any]:
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+        if not self._authorized("create_tab", f"tab:{tab_id}") and not self._authorized(
+            "manage_users", "admin/users"
+        ):
+            return {"ok": False, "status": "forbidden", "error": "permission_denied"}
+        if not isinstance(updates, dict) or not updates:
+            return {"ok": False, "status": "invalid_config", "error": "updates are required"}
+        forbidden = {
+            "tab_id",
+            "created_at",
+            "models",
+            "monitoring_active",
+            "last_snapshot",
+        }
+        clean = {str(k): v for k, v in updates.items() if str(k) not in forbidden}
+        if not clean:
+            return {"ok": False, "status": "invalid_config", "error": "no editable fields"}
+        if "title" in clean:
+            clean["title"] = str(clean["title"] or "").strip()[:200]
+            if not clean["title"]:
+                return {"ok": False, "status": "invalid_config", "error": "title cannot be empty"}
+
+        def _update():
+            current = dict(getattr(widget, "config", None) or {})
+            current.update(clean)
+            widget.config = current
+            manager = getattr(self._window, "tab_config_manager", None)
+            if manager is None or not hasattr(manager, "add_config"):
+                raise RuntimeError("config_manager_unavailable")
+            manager.add_config(tab_id, current)
+            tabs_widget = getattr(self._window, "tabs", None)
+            if tabs_widget is not None and "title" in clean:
+                index = tabs_widget.indexOf(widget)
+                if index >= 0:
+                    tabs_widget.setTabText(index, current["title"])
+            refresh = getattr(self._window, "refresh_fleet_dashboard", None)
+            if callable(refresh):
+                refresh()
+            return {"tab_id": tab_id, "updated_fields": sorted(clean)}
+
+        return self._submit_operation("update_tab", _update, requested_by=requested_by)
+
+    def delete_tab(self, tab_id: str, *, requested_by: str = "api") -> dict[str, Any]:
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+        config = dict(getattr(widget, "config", None) or {})
+        owner = str(config.get("created_by") or "").strip()
+        actor = str(
+            getattr(self._window, "current_username", None) or requested_by or ""
+        ).strip()
+        is_owner = bool(owner and actor and owner == actor)
+        if not self._authorized("delete_tab", f"tab:{tab_id}") and not is_owner:
+            return {"ok": False, "status": "forbidden", "error": "permission_denied"}
+
+        def _delete():
+            if bool(getattr(widget, "monitoring_active", False)) and hasattr(
+                widget, "stop_monitoring"
+            ):
+                widget.stop_monitoring()
+            tabs_widget = getattr(self._window, "tabs", None)
+            if tabs_widget is not None:
+                index = tabs_widget.indexOf(widget)
+                if index >= 0:
+                    tabs_widget.removeTab(index)
+            custom_tabs = getattr(self._window, "custom_tabs", None) or {}
+            custom_tabs.pop(tab_id, None)
+            manager = getattr(self._window, "tab_config_manager", None)
+            if manager is not None and hasattr(manager, "remove_config"):
+                manager.remove_config(tab_id)
+            refresh = getattr(self._window, "refresh_fleet_dashboard", None)
+            if callable(refresh):
+                refresh()
+            return {"tab_id": tab_id, "deleted": True}
+
+        return self._submit_operation("delete_tab", _delete, requested_by=requested_by)
+
+    def train_tab(
+        self,
+        tab_id: str,
+        *,
+        model_id: Optional[str] = None,
+        requested_by: str = "api",
+    ) -> dict[str, Any]:
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+        if not self._authorized("train_model", f"tab:{tab_id}") and not self._authorized(
+            "create_tab", f"tab:{tab_id}"
+        ):
+            return {"ok": False, "status": "forbidden", "error": "permission_denied"}
+        if model_id:
+            listing = self.list_tab_models(tab_id)
+            available = {str(m.get("model_id")) for m in listing.get("models") or []}
+            if str(model_id) not in available:
+                return {
+                    "ok": False,
+                    "status": "model_not_found",
+                    "tab_id": tab_id,
+                    "model_id": str(model_id),
+                }
+
+        def _train():
+            train = getattr(widget, "train_model", None)
+            if not callable(train):
+                raise RuntimeError("train_unsupported")
+            started = train(model_id=str(model_id) if model_id else None, silent=True)
+            if started is False:
+                raise RuntimeError("training_not_started")
+            return {"tab_id": tab_id, "model_id": model_id, "started": True}
+
+        result = self._submit_operation("train_tab", _train, requested_by=requested_by)
+        result["job_id"] = result.get("operation_id")
+        return result
+
+    def _loaded_tab_frame(self, tab_id: str):
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return None, None
+        processor = getattr(widget, "data_processor", None)
+        if processor is None:
+            return widget, None
+        frame = getattr(processor, "preprocessed_data", None)
+        if frame is None:
+            frame = getattr(processor, "data", None)
+        return widget, frame
+
+    def get_tab_data_schema(self, tab_id: str) -> dict[str, Any]:
+        with self._lock:
+            widget, frame = self._loaded_tab_frame(tab_id)
+            if widget is None:
+                return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+            config = dict(getattr(widget, "config", None) or {})
+            if frame is None:
+                return {
+                    "ok": True,
+                    "status": "data_not_loaded",
+                    "tab_id": tab_id,
+                    "source": {
+                        "data_folder": config.get("data_folder"),
+                        "source_file": config.get("source_file"),
+                        "file_type": config.get("data_file_type"),
+                    },
+                    "row_count": 0,
+                    "columns": [],
+                }
+            columns = []
+            for col in frame.columns:
+                series = frame[col]
+                columns.append(
+                    {
+                        "name": str(col),
+                        "dtype": str(series.dtype),
+                        "null_count": int(series.isna().sum()),
+                    }
+                )
+            return {
+                "ok": True,
+                "status": "ok",
+                "tab_id": tab_id,
+                "source": {
+                    "data_folder": config.get("data_folder"),
+                    "source_file": config.get("source_file"),
+                    "file_type": config.get("data_file_type"),
+                },
+                "row_count": int(len(frame)),
+                "columns": columns,
+            }
+
+    def get_tab_data_preview(self, tab_id: str, limit: int = 50, *, head: bool = False) -> dict[str, Any]:
+        limit = max(1, min(int(limit), 200))
+        with self._lock:
+            widget, frame = self._loaded_tab_frame(tab_id)
+            if widget is None:
+                return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+            if frame is None:
+                return {
+                    "ok": True,
+                    "status": "data_not_loaded",
+                    "tab_id": tab_id,
+                    "columns": [],
+                    "rows": [],
+                }
+            preview = frame.head(limit) if head else frame.tail(limit)
+            rows = [
+                {
+                    str(key): self._serialize_metric_value(value)
+                    for key, value in record.items()
+                }
+                for record in preview.to_dict(orient="records")
+            ]
+            return {
+                "ok": True,
+                "status": "ok",
+                "tab_id": tab_id,
+                "columns": [str(col) for col in preview.columns],
+                "row_count": int(len(frame)),
+                "returned": len(rows),
+                "rows": rows,
+            }
+
+    def start_tab(self, tab_id: str, *, requested_by: str = "api") -> dict[str, Any]:
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+        if not self._authorized("process_data", f"tab:{tab_id}") and not self._authorized(
+            "create_tab", "*"
+        ):
+            return {"ok": False, "status": "forbidden", "error": "permission_denied"}
+        if bool(getattr(widget, "monitoring_active", False)):
+            return {
+                "ok": True,
+                "accepted": True,
+                "status": "already_monitoring",
+                "tab_id": tab_id,
+            }
+        count_fn = getattr(widget, "_count_trained_models", None)
+        if callable(count_fn):
+            try:
+                trained_n = int(count_fn())
+            except Exception:
+                trained_n = -1
+            if trained_n == 0:
+                return {
+                    "ok": False,
+                    "status": "not_ready",
+                    "error": "no_trained_models",
+                    "tab_id": tab_id,
+                }
+
+        def _start():
+            start = getattr(widget, "start_monitoring", None)
+            if not callable(start):
+                raise RuntimeError("start_unsupported")
+            start()
+            return {
+                "tab_id": tab_id,
+                "monitoring_active": bool(getattr(widget, "monitoring_active", True)),
+            }
+
+        return self._submit_operation("start_tab", _start, requested_by=requested_by)
+
+    def stop_tab(self, tab_id: str, *, requested_by: str = "api") -> dict[str, Any]:
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+        if not self._authorized("process_data", f"tab:{tab_id}") and not self._authorized(
+            "create_tab", "*"
+        ):
+            return {"ok": False, "status": "forbidden", "error": "permission_denied"}
+
+        def _stop():
+            stop = getattr(widget, "stop_monitoring", None)
+            if not callable(stop):
+                raise RuntimeError("stop_unsupported")
+            stop()
+            return {
+                "tab_id": tab_id,
+                "monitoring_active": bool(getattr(widget, "monitoring_active", False)),
+            }
+
+        return self._submit_operation("stop_tab", _stop, requested_by=requested_by)
+
+    def get_tab_pipeline_metrics(self, tab_id: str, limit: int = 50) -> dict[str, Any]:
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return {"ok": False, "status": "tab_not_found", "tab_id": tab_id, "metrics": []}
+        limit = max(1, min(int(limit), 200))
+        try:
+            from app.monitoring.async_pipeline import get_async_pipeline
+
+            recent = get_async_pipeline().get_recent_metrics(limit=500)
+        except Exception as exc:
+            return {"ok": True, "tab_id": tab_id, "metrics": [], "error": str(exc)[:200]}
+        matched = [m for m in recent if str(m.get("tab_id") or "") == str(tab_id)]
+        return {"ok": True, "tab_id": tab_id, "metrics": matched[-limit:]}
+
+    def load_tab_data(
+        self,
+        tab_id: str,
+        *,
+        file_path: str,
+        file_type: str = "csv",
+        requested_by: str = "api",
+    ) -> dict[str, Any]:
+        widget = self._get_widget(tab_id)
+        if widget is None:
+            return {"ok": False, "status": "tab_not_found", "tab_id": tab_id}
+        if not self._authorized("import_data", f"tab:{tab_id}") and not self._authorized(
+            "view_data", "*"
+        ):
+            return {"ok": False, "status": "forbidden", "error": "permission_denied"}
+        kind = str(file_type or "csv").strip().lower()
+        if kind not in {"csv", "json"}:
+            return {"ok": False, "status": "invalid_config", "error": "file_type must be csv or json"}
+        try:
+            resolved = _safe_local_data_path(
+                file_path,
+                extra_root=str((getattr(widget, "config", None) or {}).get("data_folder") or ""),
+            )
+        except FileNotFoundError:
+            return {"ok": False, "status": "not_found", "error": "file_path does not exist"}
+        except ValueError as exc:
+            return {"ok": False, "status": "invalid_config", "error": str(exc)}
+
+        def _load():
+            config = dict(getattr(widget, "config", None) or {})
+            config["source_file"] = str(resolved)
+            config["data_folder"] = str(resolved.parent)
+            config["data_file_type"] = "CSV" if kind == "csv" else "JSON"
+            widget.config = config
+            manager = getattr(self._window, "tab_config_manager", None)
+            if manager is not None and hasattr(manager, "add_config"):
+                manager.add_config(tab_id, config)
+            loader = getattr(widget, "load_latest_data", None)
+            if callable(loader):
+                _data, err = loader(for_monitoring=False, force_reload=True)
+                if err:
+                    raise RuntimeError(err)
+            return {"tab_id": tab_id, "source_file": str(resolved), "file_type": kind}
+
+        return self._submit_operation("load_tab_data", _load, requested_by=requested_by)
+
+    def get_registry_models(self, tab_id: str, limit: int = 20) -> dict[str, Any]:
+        listing = self.list_tab_models(tab_id)
+        if not listing.get("ok"):
+            return listing
+        registry = getattr(self._window, "model_registry", None)
+        recent: list[dict[str, Any]] = []
+        getter = getattr(registry, "get_recent_models", None)
+        if callable(getter):
+            try:
+                rows = getter(limit=max(1, min(int(limit), 50)))
+                for row in rows or []:
+                    if isinstance(row, dict):
+                        recent.append(row)
+                    elif isinstance(row, (list, tuple)) and len(row) >= 3:
+                        recent.append(
+                            {
+                                "id": row[0],
+                                "name": row[1],
+                                "model_type": row[2],
+                                "last_used": row[3] if len(row) > 3 else None,
+                                "use_count": row[4] if len(row) > 4 else None,
+                                "filepath": row[5] if len(row) > 5 else None,
+                            }
+                        )
+            except TypeError:
+                try:
+                    rows = getter(max(1, min(int(limit), 50)))
+                    for row in rows or []:
+                        if isinstance(row, (list, tuple)) and len(row) >= 3:
+                            recent.append({"id": row[0], "name": row[1], "model_type": row[2]})
+                except Exception:
+                    recent = []
+            except Exception:
+                recent = []
+        return {
+            "ok": True,
+            "tab_id": tab_id,
+            "models": listing.get("models") or [],
+            "registry": recent,
+        }
 
     def list_tab_models(self, tab_id: str) -> dict[str, Any]:
         """List configured models on a tab with trained status and metric keys."""

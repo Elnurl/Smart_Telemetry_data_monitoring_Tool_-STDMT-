@@ -148,12 +148,12 @@ def test_runner_ask_with_mocked_fc(tmp_path, host, monkeypatch):
     audit = AgentAuditLog(tmp_path / "agent_decisions.db")
     runner = AgentRunner(audit=audit, tool_host_getter=lambda: host, allow_llm=True)
     out = runner.ask("Give me a full health report for all tabs")
-    assert out["phase"] == 3
+    assert out["phase"] == 4
     assert out["route"] == "tool"
     assert out["node"] == "RA-LLM"
     assert out["llm_used"] is True
     assert out["tool_trace"][0]["tool"] == "get_fleet_status"
-    assert "[R-LLM]" in out["reply"]
+    assert "[R-LLM]" not in out["reply"]
     assert audit.list_decisions(limit=1)[0]["outcome"] == "function_calling"
 
 

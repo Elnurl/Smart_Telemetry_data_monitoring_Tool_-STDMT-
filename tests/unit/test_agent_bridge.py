@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,7 +23,26 @@ from app.agent.tools import (
 class _FakeTab:
     def __init__(self, tab_id, title="CH1"):
         self.tab_id = tab_id
-        self.config = {"title": title}
+        self.config = {
+            "title": title,
+            "models": [
+                {
+                    "model_id": f"{tab_id}-model",
+                    "model_type": "Isolation Forest",
+                    "model_parameters": {},
+                }
+            ],
+        }
+        self.models = {}
+        self.selected_model_id = None
+        self.monitoring_active = False
+        self.trained_model_ids = []
+        import pandas as pd
+
+        self.data_processor = SimpleNamespace(
+            data=pd.DataFrame({"time": ["t1", "t2"], "value": [1.0, 2.0]}),
+            preprocessed_data=None,
+        )
         self.last_snapshot = {
             "tab_id": tab_id,
             "title": title,
@@ -44,6 +64,13 @@ class _FakeTab:
     def get_snapshot(self):
         return dict(self.last_snapshot)
 
+    def train_model(self, model_id=None, silent=False):
+        self.trained_model_ids.append(model_id)
+        return True
+
+    def stop_monitoring(self):
+        self.monitoring_active = False
+
 
 class _FakeRegistry:
     def get_pending_retrain_signals(self):
@@ -57,6 +84,15 @@ class _FakeWindow:
             "t2": _FakeTab("t2", "CH2"),
         }
         self.model_registry = _FakeRegistry()
+        self.tab_config_manager = SimpleNamespace(
+            add_config=lambda *_args, **_kwargs: None,
+            remove_config=lambda *_args, **_kwargs: None,
+        )
+
+    def _create_custom_tab_from_config(self, config):
+        tab_id = f"t{len(self.custom_tabs) + 1}"
+        self.custom_tabs[tab_id] = _FakeTab(tab_id, config["title"])
+        return tab_id
 
 
 @pytest.fixture
@@ -140,6 +176,26 @@ def test_air_gap_policy_rejects_non_loopback_bind():
     assert is_loopback_url("https://api.openai.com/v1") is False
 
 
+def test_api_token_rejects_short_secret():
+    from app.agent.server import resolve_api_token
+
+    with pytest.raises(ValueError):
+        resolve_api_token("too-short")
+
+
+def test_toolhost_mutation_respects_current_user_rbac():
+    window = _FakeWindow()
+    window.current_username = "viewer"
+    window.service_layer = SimpleNamespace(
+        authorize=lambda _username, _permission, resource="*": False
+    )
+    restricted = MainWindowToolHost(window)
+
+    result = restricted.create_tab({"title": "Denied"}, requested_by="test")
+    assert result["ok"] is False
+    assert result["status"] == "forbidden"
+
+
 def test_fastapi_tabs_endpoint(tmp_path, host):
     fastapi = pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
@@ -148,7 +204,9 @@ def test_fastapi_tabs_endpoint(tmp_path, host):
 
     audit = AgentAuditLog(tmp_path / "agent_decisions.db")
     runner = AgentRunner(audit=audit, tool_host_getter=lambda: host)
-    client = TestClient(create_app(audit=audit, runner=runner))
+    token = "test-token-with-at-least-24-characters"
+    client = TestClient(create_app(audit=audit, runner=runner, api_token=token))
+    auth = {"Authorization": f"Bearer {token}"}
 
     health = client.get("/health")
     assert health.status_code == 200
@@ -157,30 +215,95 @@ def test_fastapi_tabs_endpoint(tmp_path, host):
     assert health.json()["llm_enabled"] is False
     assert health.json()["data_egress"] == "none"
     assert health.json()["phase"] == 4
+    assert health.json()["sprint"] == 3
+    assert health.json()["auth"] == "bearer_required"
     assert health.json()["mutating_tools"] is True
     assert "knowledge" in health.json()
 
-    tabs = client.get("/tabs")
+    assert client.get("/tabs").status_code == 401
+    assert client.get("/tabs", headers={"Authorization": "Bearer wrong"}).status_code == 401
+
+    tabs = client.get("/tabs", headers=auth)
     assert tabs.status_code == 200
     body = tabs.json()
     assert len(body["tabs"]) == 2
     assert body["tabs"][0]["snapshot"]["health_state"] == "Nominal"
+    versioned_tabs = client.get("/v1/ops/tabs", headers=auth)
+    assert versioned_tabs.status_code == 200
+    assert len(versioned_tabs.json()["tabs"]) == 2
+    assert client.get("/v1/agent/tools", headers=auth).status_code == 200
 
-    snap = client.get("/tabs/t1/snapshot")
+    definition = client.get("/tabs/t1", headers=auth)
+    assert definition.status_code == 200
+    assert definition.json()["config"]["title"] == "CH1"
+
+    snap = client.get("/tabs/t1/snapshot", headers=auth)
     assert snap.status_code == 200
     assert snap.json()["snapshot"]["title"] == "CH1"
 
-    hist = client.get("/tabs/t1/history?n=1")
+    hist = client.get("/tabs/t1/history?n=1", headers=auth)
     assert hist.status_code == 200
     assert len(hist.json()["history"]) == 1
 
-    missing = client.get("/tabs/nope/snapshot")
+    missing = client.get("/tabs/nope/snapshot", headers=auth)
     assert missing.status_code == 404
 
-    run = client.post("/agent/run", json={"tab_id": "t1", "task": "summarize"})
+    schema = client.get("/tabs/t1/data/schema", headers=auth)
+    assert schema.status_code == 200
+    assert schema.json()["row_count"] == 2
+    assert schema.json()["columns"][1]["name"] == "value"
+
+    preview = client.get("/tabs/t1/data/preview?limit=1", headers=auth)
+    assert preview.status_code == 200
+    assert preview.json()["returned"] == 1
+    assert preview.json()["rows"][0]["value"] == 2.0
+
+    created = client.post(
+        "/tabs",
+        json={"config": {"title": "API Tab"}, "requested_by": "test"},
+        headers=auth,
+    )
+    assert created.status_code == 202
+    created_op = client.get(
+        f"/operations/{created.json()['operation_id']}",
+        headers=auth,
+    ).json()
+    assert created_op["status"] == "completed"
+    created_tab_id = created_op["result"]["tab_id"]
+
+    updated = client.patch(
+        f"/tabs/{created_tab_id}",
+        json={"updates": {"title": "API Tab Updated"}, "requested_by": "test"},
+        headers=auth,
+    )
+    assert updated.status_code == 202
+    assert client.get(f"/tabs/{created_tab_id}", headers=auth).json()["config"]["title"] == (
+        "API Tab Updated"
+    )
+
+    deleted = client.delete(f"/tabs/{created_tab_id}?requested_by=test", headers=auth)
+    assert deleted.status_code == 202
+    assert client.get(f"/tabs/{created_tab_id}", headers=auth).status_code == 404
+
+    train = client.post(
+        "/tabs/t1/train",
+        json={"model_id": "t1-model", "requested_by": "test"},
+        headers=auth,
+    )
+    assert train.status_code == 202
+    operation_id = train.json()["operation_id"]
+    operation = client.get(f"/operations/{operation_id}", headers=auth)
+    assert operation.status_code == 200
+    assert operation.json()["status"] == "completed"
+
+    run = client.post(
+        "/agent/run",
+        json={"tab_id": "t1", "task": "summarize"},
+        headers=auth,
+    )
     assert run.status_code == 200
     assert run.json()["outcome"] == "observation_only"
 
-    decisions = client.get("/agent/decisions")
+    decisions = client.get("/agent/decisions", headers=auth)
     assert decisions.status_code == 200
     assert len(decisions.json()["decisions"]) >= 1

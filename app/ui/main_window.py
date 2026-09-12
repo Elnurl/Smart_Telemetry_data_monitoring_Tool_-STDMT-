@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
         self.show_overview()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("STDMS — Satellite Telemetry Monitoring")
+        self.setWindowTitle("SDA v4.0")
         self.setMinimumSize(1100, 720)
         self.resize(1280, 820)
 

@@ -65,6 +65,17 @@ def test_autosave_and_bootstrap_round_trip(tmp_path: Path):
   assert models_list[0]["model_type"] == "Isolation Forest"
 
 
+def test_enhanced_load_rejects_regular_isolation_forest():
+  from app.models.detectors import EnhancedAnomalyDetectionModel
+
+  path = Path("data/custom_tabs/57738f17-2cb3-421b-861a-72c16b7394b6/models/2ae400ba-36af-40a6-a1eb-fb9c1c43035c.pkl")
+  if not path.exists():
+    pytest.skip("sample Isolation Forest pickle not present")
+  loaded, message = EnhancedAnomalyDetectionModel.load(str(path))
+  assert loaded is None
+  assert "not an enhanced" in message.lower()
+
+
 def test_load_model_from_file_prefers_enhanced_loader(tmp_path: Path):
   enhanced_path = tmp_path / "enhanced.pkl"
   with open(enhanced_path, "wb") as handle:

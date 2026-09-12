@@ -1,4 +1,4 @@
-"""AgentRunner — Phase 0–3: context gather + function calling + propose drafts."""
+"""AgentRunner — Phase 0–4: context gather + function calling + propose drafts."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional
 from app.agent.audit import AgentAuditLog
 from app.agent.bridge import ToolHost
 from app.agent.function_calling import run_function_calling
+from app.agent.ollama_client import DEFAULT_OLLAMA_MODEL
 from app.agent.policy import DEFAULT_ALLOW_LLM, is_loopback_url
 from app.agent.tools import get_all_snapshots, get_pending_signals, get_tab_history, get_tab_snapshot
 
@@ -36,7 +37,7 @@ class AgentRunner:
         self.audit = audit
         self.tool_host_getter = tool_host_getter
         self.allow_llm = bool(allow_llm) and is_loopback_url(llm_host)
-        self.model = model or "qwen3:8b"
+        self.model = model or DEFAULT_OLLAMA_MODEL
         self.llm_host = llm_host
         if allow_llm and not self.allow_llm:
             logger.warning("LLM requested but host is not loopback — LLM disabled")
@@ -58,7 +59,7 @@ class AgentRunner:
                 "lines": [],
                 "llm_used": False,
                 "tool_trace": [],
-                "phase": 3,
+                "phase": 4,
             }
 
         tabs = get_all_snapshots(host=host)
@@ -151,7 +152,7 @@ class AgentRunner:
             tool_called=tool_trace[-1]["tool"] if tool_trace else "agent_monitor_cycle",
             tool_params={
                 "task": task,
-                "phase": 3,
+                "phase": 4,
                 "tool_trace": tool_trace,
                 "pending_drafts": pending_after.get("pending_draft_count"),
                 "proactive_count": len(proactive_results),
@@ -174,7 +175,7 @@ class AgentRunner:
             "pending_retrain_count": pending_after.get("pending_retrain_count", 0),
             "proactive_results": proactive_results,
             "air_gap": True,
-            "phase": 3,
+            "phase": 4,
             "outcome": outcome,
             "tab_count": len(tabs),
         }
@@ -195,7 +196,7 @@ class AgentRunner:
                     "llm_used": cycle.get("llm_used"),
                     "tool_trace": cycle.get("tool_trace") or [],
                     "air_gap": True,
-                    "phase": 3,
+                    "phase": 4,
                     "outcome": cycle.get("outcome"),
                 }
 
@@ -275,12 +276,26 @@ class AgentRunner:
             tool_params={
                 "task": task,
                 "tab_id": tab_id,
-                "phase": 3,
+                "phase": 4,
                 "tool_trace": tool_trace,
             },
             reasoning=str(reasoning)[:8000],
             outcome=str(outcome),
         )
+        try:
+            from app.agent.memory import get_graph_memory, record_decision_memory
+
+            record_decision_memory(
+                get_graph_memory(),
+                decision_id=decision_id,
+                tab_id=tab_id,
+                outcome=str(outcome),
+                tool_called=tool_called,
+                reasoning=str(reasoning)[:500],
+                tool_trace=[str(t.get("tool") or "") for t in (tool_trace or []) if t.get("tool")],
+            )
+        except Exception as exc:
+            logger.warning("graph memory decision upsert failed: %s", exc)
 
         return {
             "ok": True,
@@ -292,7 +307,7 @@ class AgentRunner:
             "llm_used": llm_used,
             "tool_trace": tool_trace,
             "air_gap": True,
-            "phase": 3,
+            "phase": 4,
             "outcome": outcome,
         }
 
@@ -325,8 +340,6 @@ class AgentRunner:
                 )
                 if auto.get("ok"):
                     reply = (
-                        "[R-LLM] routing → tool\n"
-                        "[RA-LLM] tools used: propose_write_sop✓\n"
                         "Created a pending SOP Word draft for human Approve.\n"
                         f"- draft_id: {auto.get('draft_id')}\n"
                         f"- kind: {auto.get('kind')}\n"
@@ -388,9 +401,7 @@ class AgentRunner:
                 if _is_create_tab_intent(user_message or ""):
                     det = _deterministic_create_tab(user_message or "", host)
                     if det and det.get("reply"):
-                        reply = (
-                            "[R-LLM] routing → tool\n[RA-LLM]\n" + str(det.get("reply"))
-                        )
+                        reply = str(det.get("reply"))
                         tool_trace = det.get("tool_trace") or []
                         outcome = det.get("outcome") or "function_calling"
                         agent_mode = "RA-LLM"
@@ -399,32 +410,33 @@ class AgentRunner:
                 elif _is_best_model_intent(user_message or ""):
                     det = _deterministic_best_model(user_message or "", host)
                     if det and det.get("reply"):
-                        reply = (
-                            "[R-LLM] routing → tool\n[RA-LLM]\n" + str(det.get("reply"))
-                        )
+                        reply = str(det.get("reply"))
                         tool_trace = det.get("tool_trace") or []
                         outcome = det.get("outcome") or "function_calling"
                         agent_mode = "RA-LLM"
                         route = "tool"
                         node = "RA-LLM"
                 else:
-                    tabs = get_all_snapshots(host=host)
-                    context = {
-                        "tabs": tabs,
-                        "pending_retrain": host.get_pending_retrain_signals(),
-                    }
-                    summary = self._summarize_context(context, tab_id=None)
-                    reply = (
-                        "[R-LLM] routing → tool\n[RA-LLM]\n"
-                        + self._rule_based_note(
+                    from app.agent.ops_intent import fulfill_intent
+
+                    filled = fulfill_intent(user_message or "", host)
+                    if filled.get("reply"):
+                        reply = str(filled.get("reply"))
+                        tool_trace = filled.get("tool_trace") or []
+                        outcome = filled.get("outcome") or "function_calling"
+                    else:
+                        tabs = get_all_snapshots(host=host)
+                        context = {
+                            "tabs": tabs,
+                            "pending_retrain": host.get_pending_retrain_signals(),
+                        }
+                        summary = self._summarize_context(context, tab_id=None)
+                        reply = self._rule_based_note(
                             task="ask", context_summary=summary, context=context
-                        )
-                    )
+                        ) or synthesize_fleet_answer(user_message or "", host)
                     agent_mode = "RA-LLM"
                     route = "tool"
                     node = "RA-LLM"
-                    if not reply:
-                        reply = synthesize_fleet_answer(user_message or "", host)
             except Exception as exc:
                 logger.warning("ask fallback failed: %s", exc)
                 reply = "Agent ask failed; see application log."
@@ -439,7 +451,7 @@ class AgentRunner:
             context_summary=f"chat: {(user_message or '')[:500]}",
             tool_called=tool_trace[-1]["tool"] if tool_trace else "agent_chat",
             tool_params={
-                "phase": 3,
+                "phase": 4,
                 "llm_used": llm_used,
                 "agent_mode": agent_mode,
                 "route": route,
@@ -450,6 +462,20 @@ class AgentRunner:
             reasoning=str(reply)[:8000],
             outcome=str(outcome),
         )
+        try:
+            from app.agent.memory import get_graph_memory, record_decision_memory
+
+            record_decision_memory(
+                get_graph_memory(),
+                decision_id=decision_id,
+                tab_id=None,
+                outcome=str(outcome),
+                tool_called=tool_trace[-1]["tool"] if tool_trace else "agent_chat",
+                reasoning=str(reply)[:500],
+                tool_trace=[str(t.get("tool") or "") for t in (tool_trace or []) if t.get("tool")],
+            )
+        except Exception as exc:
+            logger.warning("graph memory decision upsert failed: %s", exc)
         return {
             "ok": True,
             "reply": reply,
@@ -462,7 +488,7 @@ class AgentRunner:
             "tool_trace": tool_trace,
             "decision_id": decision_id,
             "outcome": outcome,
-            "phase": 3,
+            "phase": 4,
         }
 
     def _summarize_context(self, context: dict[str, Any], *, tab_id: Optional[str]) -> str:
@@ -521,6 +547,6 @@ class AgentRunner:
             f"[Observation] {context_summary}\n"
             f"[Analysis] Operator attention: {attention}. "
             f"(heuristic / Ollama offline; task={task})\n"
-            "[Recommendation] Start Ollama (qwen3:8b) for tool-chained analysis; "
+            "[Recommendation] Start Ollama (qwen3.5:9b) for tool-chained analysis; "
             "review Warning/drift/OBS tabs first. No data left this host."
         )

@@ -34,14 +34,13 @@ def csv_folder(tmp_path: Path) -> Path:
 def test_inspect_a1_schema(csv_folder: Path):
     out = inspect_data_folder(str(csv_folder))
     assert out["ok"] is True
-    # GUI DataReader contract: time / value / value2 / …
-    assert "value" in out["columns"]
-    assert "value" in out["numeric_cols"]
-    assert "time" in out["timestamp_candidates"]
+    assert "Battery_Temp" in out["columns"]
+    assert "Battery_Temp" in out["numeric_cols"]
+    assert "timestamp" in out["timestamp_candidates"]
     assert out["row_count"] >= 60
-    assert "value" in out["null_rates"]
-    assert "value" in out["sample_ranges"]
-    rng = out["sample_ranges"]["value"]
+    assert "Battery_Temp" in out["null_rates"]
+    assert "Battery_Temp" in out["sample_ranges"]
+    rng = out["sample_ranges"]["Battery_Temp"]
     assert "min" in rng and "max" in rng and "mean" in rng
     assert rng["max"] >= rng["min"]
     assert out["data_quality_ok"] is True
@@ -92,7 +91,7 @@ def test_suggest_a2_schema(csv_folder: Path):
     assert out["features"]
     assert "time" not in out["features"]
     assert "timestamp" not in out["features"]
-    assert "value" in out["features"]
+    assert "Battery_Temp" in out["features"]
     assert 2 <= len(out["models"]) <= 3
     assert out["schedule_type"] == "Continuous"
     assert out["window_size"] >= 50

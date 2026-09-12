@@ -8,10 +8,13 @@ import json
 import logging
 import os
 import pickle
+import smtplib
 import threading
 import types
 import uuid
 from collections import deque
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
 
 import numpy as np
@@ -48,6 +51,7 @@ from PyQt5.QtWidgets import (
     QDialog,
 )
 
+from app.models.model_types import catalog_display_name
 from app.models.drift import TabConceptDriftChecker, compute_adaptive_threshold
 from app.models.fsm import (
     MissionModeStore,
@@ -79,7 +83,13 @@ from app.tabs.custom_tab.panels.data_import import build_data_import_panel
 from app.tabs.custom_tab.panels.slots import assert_panel_slots_complete
 from app.tabs.custom_tab.panels.visualization import build_visualization_panel
 from app.tabs.custom_tab.stream_connector import StreamConnector, StreamRecordBuffer
-from app.tabs.custom_tab.workers import TabMonitoringWorker, TabTrainWorker
+from app.monitoring.async_pipeline import get_async_pipeline
+from app.monitoring.pipeline_bridge import (
+    ensure_pipeline,
+    get_pipeline_bridge,
+    make_on_result_callback,
+)
+from app.tabs.custom_tab.workers import TabTrainWorker
 
 logger = logging.getLogger("STDMS.CustomMonitoringTab")
 
@@ -170,12 +180,14 @@ class CustomMonitoringTab(QWidget):
         self.data_processor = None
         self.model = None  # Keep for backward compatibility
         self.models = {}  # Dictionary to store multiple models: {model_id: model_object}
+        # Legacy QTimer kept for compatibility; Continuous/Scheduled use AsyncMonitoringPipeline.
         self.monitoring_timer = QTimer(self)
-        self.monitoring_timer.timeout.connect(self.monitor_data)
         self.monitoring_active = False
-        self._monitoring_worker = None
+        self._monitoring_worker = None  # deprecated: monitoring uses async pipeline
         self._monitoring_cycle_pending = False
+        self._pipeline_registered = False
         self._train_worker = None
+        self._setup_pipeline_bridge()
         # Per-tab independent pipeline state
         self.reference_window_size = 200
         self.score_history = []
@@ -1184,7 +1196,8 @@ class CustomMonitoringTab(QWidget):
             for i in range(self.model_list_widget.count()):
                 item = self.model_list_widget.item(i)
                 if item.checkState() == Qt.Checked:
-                    checked_types.append(item.text())
+                    stored = item.data(Qt.UserRole)
+                    checked_types.append(catalog_display_name(stored or item.text()))
 
         if checked_types:
             matched = []
@@ -1681,10 +1694,9 @@ class CustomMonitoringTab(QWidget):
             self.results_text.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Stream connector active: {source_label}")
 
         if schedule_type == "On-Demand":
-            # Manual one-shot run; no automatic timer loop.
+            # Manual one-shot run via shared async pipeline (off UI thread).
             self.results_text.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] On-Demand run requested")
             self.monitor_data()
-            # If stream mode was selected for manual run, close connector after one cycle.
             if active_device:
                 self._stop_stream_connector()
             self.status_label.setText("Status: On-Demand (manual run completed)")
@@ -1696,7 +1708,6 @@ class CustomMonitoringTab(QWidget):
             interval_ms = int(self.config.get('interval_ms', 300000))
             if interval_ms <= 0:
                 interval_ms = 300000
-            self.monitoring_timer.start(interval_ms)
             self.monitoring_active = True
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
@@ -1704,13 +1715,12 @@ class CustomMonitoringTab(QWidget):
             self._update_health_panel(health_state="Monitoring")
             self.results_text.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Continuous monitoring started")
             self._publish_snapshot(health_state="Monitoring")
-            self.monitor_data()
+            self._register_with_pipeline(interval_ms=interval_ms, schedule_type="Continuous")
             return
 
         if schedule_type == "Scheduled":
-            # Check every 30 seconds and execute only at configured UTC HH:MM.
+            # Pipeline polls every 30s; due_fn gates execution to configured UTC HH:MM.
             self.last_scheduled_utc_key = None
-            self.monitoring_timer.start(30000)
             self.monitoring_active = True
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
@@ -1720,14 +1730,64 @@ class CustomMonitoringTab(QWidget):
             self._update_health_panel(health_state="Monitoring (Scheduled)")
             self.results_text.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Scheduled monitoring armed for UTC {utc_h:02d}:{utc_m:02d}")
             self._publish_snapshot(health_state="Monitoring (Scheduled)")
-            if self._is_scheduled_due_now():
-                self.monitor_data()
+            self._register_with_pipeline(
+                interval_ms=30000,
+                schedule_type="Scheduled",
+                due_fn=self._is_scheduled_due_now,
+                run_immediately=bool(self._is_scheduled_due_now()),
+            )
             return
-    
+
+    def _setup_pipeline_bridge(self) -> None:
+        bridge = get_pipeline_bridge()
+        bridge.set_handler(self.tab_id, self._on_pipeline_cycle_result)
+
+    def _register_with_pipeline(
+        self,
+        *,
+        interval_ms: int,
+        schedule_type: str,
+        due_fn=None,
+        run_immediately: bool = True,
+    ) -> None:
+        pipe = ensure_pipeline()
+        bridge = get_pipeline_bridge()
+        bridge.set_handler(self.tab_id, self._on_pipeline_cycle_result)
+        pipe.register_tab(
+            self.tab_id,
+            interval_ms=interval_ms,
+            compute_fn=self._compute_monitoring_cycle,
+            on_result=make_on_result_callback(bridge),
+            schedule_type=schedule_type,
+            due_fn=due_fn,
+            run_immediately=run_immediately,
+        )
+        self._pipeline_registered = True
+        self.results_text.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Async pipeline registered"
+        )
+
+    def _unregister_from_pipeline(self) -> None:
+        if not self._pipeline_registered and self.tab_id not in get_async_pipeline().active_tab_ids():
+            get_pipeline_bridge().clear_handler(self.tab_id)
+            return
+        try:
+            get_async_pipeline().unregister_tab(self.tab_id)
+        except Exception:
+            pass
+        get_pipeline_bridge().clear_handler(self.tab_id)
+        self._pipeline_registered = False
+
+    def _on_pipeline_cycle_result(self, result, metrics=None) -> None:
+        """GUI-thread apply path for async pipeline cycles."""
+        if isinstance(result, dict):
+            self._apply_monitoring_cycle_result(result)
+
     def stop_monitoring(self):
         """Stop monitoring"""
         self.monitoring_timer.stop()
         self._monitoring_cycle_pending = False
+        self._unregister_from_pipeline()
         if self._monitoring_worker and self._monitoring_worker.isRunning():
             self._monitoring_worker.requestInterruption()
             self._monitoring_worker.wait(5000)
@@ -1740,33 +1800,28 @@ class CustomMonitoringTab(QWidget):
         self._update_health_panel(health_state="Inactive")
         self._publish_snapshot(health_state="Inactive")
         self.results_text.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Monitoring stopped")
-    
+
     def monitor_data(self):
-        """Queue a monitoring cycle on a background worker (keeps UI responsive)."""
+        """Queue a monitoring cycle on the shared async pipeline (keeps UI responsive)."""
         schedule_type = self.config.get("schedule_type", "Continuous")
         if schedule_type == "Scheduled" and self.monitoring_active and not self._is_scheduled_due_now():
             return
-        if self._monitoring_worker and self._monitoring_worker.isRunning():
-            self._monitoring_cycle_pending = True
-            return
-        self._start_monitoring_worker()
+        self._submit_monitoring_once(schedule_type=schedule_type)
 
-    def _start_monitoring_worker(self):
+    def _submit_monitoring_once(self, *, schedule_type: str = "On-Demand") -> None:
         self._monitoring_cycle_pending = False
         self.results_text.append(
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Checking for new data..."
         )
-        self._monitoring_worker = TabMonitoringWorker(self)
-        self._monitoring_worker.finished.connect(self._on_monitoring_cycle_finished)
-        self._monitoring_worker.start()
-
-    def _on_monitoring_cycle_finished(self, result):
-        self._monitoring_worker = None
-        if isinstance(result, dict):
-            self._apply_monitoring_cycle_result(result)
-        if self._monitoring_cycle_pending and self.monitoring_active:
-            self._monitoring_cycle_pending = False
-            QTimer.singleShot(0, self._start_monitoring_worker)
+        pipe = ensure_pipeline()
+        bridge = get_pipeline_bridge()
+        bridge.set_handler(self.tab_id, self._on_pipeline_cycle_result)
+        pipe.submit_once(
+            self.tab_id,
+            self._compute_monitoring_cycle,
+            on_result=make_on_result_callback(bridge),
+            schedule_type=schedule_type,
+        )
 
     def _monitoring_log(self, log_lines, message):
         log_lines.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {message}")
@@ -1855,10 +1910,15 @@ class CustomMonitoringTab(QWidget):
 
                 try:
                     scores, anomalies = model_obj.predict(predict_df)
+                    if scores is None:
+                        err = anomalies if isinstance(anomalies, str) else "predict returned no scores"
+                        self._monitoring_log(log_lines, f"{model_type} prediction failed: {err}")
+                        continue
                     score_arr = np.asarray(scores, dtype=float).ravel()
                     score_arr = score_arr[np.isfinite(score_arr)]
                     if len(score_arr) == 0:
-                        score_arr = np.array([0.0], dtype=float)
+                        self._monitoring_log(log_lines, f"{model_type} prediction failed: empty/non-finite scores")
+                        continue
 
                     anomaly_arr = np.asarray(anomalies).ravel() if anomalies is not None else np.array([], dtype=float)
                     if anomaly_arr.size > 0:
@@ -2562,7 +2622,7 @@ Data Source: {self.config['data_folder']}
 
 {details}
 
-This is an automated alert from the Satellite Telemetry Monitoring System.
+This is an automated alert from SDA v4.0.
 """
             msg.attach(MIMEText(body, 'plain'))
             

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SDA v4.0 — Department briefing</title>
+  <style>
+    :root {
+      --bg: #1c2128;
+      --panel: #f4f6f8;
+      --ink: #1c2128;
+      --muted: #5c6470;
+      --line: #d5dbe3;
+      --accent: #8a6d2b;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #111418;
+      color: var(--ink);
+    }
+    .deck { height: 100%; }
+    .slide {
+      display: none;
+      height: 100%;
+      padding: 48px 64px 72px;
+      background: var(--panel);
+      flex-direction: column;
+    }
+    .slide.on { display: flex; }
+    .slide.title {
+      background: var(--bg);
+      color: #f3f5f7;
+      justify-content: flex-end;
+    }
+    .kicker {
+      font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--accent); font-weight: 600; margin: 0 0 10px;
+    }
+    .title .kicker { color: #d4b56a; }
+    h1 { font-size: 40px; font-weight: 650; margin: 0 0 12px; line-height: 1.15; letter-spacing: -0.02em; }
+    h2 { font-size: 28px; font-weight: 650; margin: 0 0 22px; letter-spacing: -0.02em; }
+    .sub { font-size: 18px; color: var(--muted); margin: 0 0 28px; max-width: 820px; line-height: 1.45; }
+    .title .sub { color: #b7c0cc; }
+    ul { margin: 0; padding-left: 22px; font-size: 18px; line-height: 1.55; }
+    li { margin: 0 0 8px; }
+    .grid { display: grid; gap: 16px; }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .g3 { grid-template-columns: 1fr 1fr 1fr; }
+    .card {
+      border: 1px solid var(--line);
+      padding: 16px 18px;
+      background: #fff;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+    .card p, .card li { font-size: 16px; margin: 0; color: var(--ink); }
+    .card ul { padding-left: 18px; }
+    .flow {
+      display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap;
+    }
+    .step {
+      flex: 1; min-width: 120px; background: #fff; border: 1px solid var(--line);
+      padding: 14px 12px; text-align: center;
+    }
+    .step b { display: block; font-size: 13px; color: var(--accent); margin-bottom: 6px; }
+    .step span { font-size: 15px; }
+    .arrow { align-self: center; color: var(--muted); font-size: 22px; }
+    table { border-collapse: collapse; width: 100%; font-size: 16px; background: #fff; }
+    th, td { border: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #eef1f4; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .bar {
+      position: fixed; left: 0; right: 0; bottom: 0; height: 44px;
+      background: var(--bg); color: #c5ced8; display: flex; align-items: center;
+      justify-content: space-between; padding: 0 20px; font-size: 13px;
+    }
+    .bar button {
+      background: transparent; color: #e8edf3; border: 1px solid #444c5a;
+      padding: 4px 10px; cursor: pointer; font-size: 13px;
+    }
+    .az { color: var(--muted); font-size: 15px; margin-top: 6px; }
+    .title .az { color: #9aa6b4; }
+    .small { font-size: 14px; color: var(--muted); }
+    @media print {
+      .bar { display: none; }
+      .slide { display: flex !important; height: 100vh; page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+<section class="slide title on">
+  <p class="kicker">Azercosmos · Operations briefing</p>
+  <h1>SDA v4.0</h1>
+  <p class="sub">Satellite Data Analysis — local desktop system for telemetry monitoring, anomaly detection, and operator-approved actions.</p>
+  <p class="az">Peyk telemetriyasının monitorinqi, anomaliya aşkarlanması və operator təsdiqi ilə idarəetmə.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">01 · Agenda</p>
+  <h2>Bu təqdimatda</h2>
+  <div class="grid g2">
+    <div class="card"><h3>Niyə</h3><ul><li>Problem: CSV-ləri əl ilə izləmək</li><li>Nə həll edir</li><li>Kim üçündür</li></ul></div>
+    <div class="card"><h3>Nədir</h3><ul><li>Əsas məqsəd</li><li>İş prinsipi</li><li>Təklif olunan imkanlar</li></ul></div>
+    <div class="card"><h3>Necə işləyir</h3><ul><li>Tab → train → monitor</li><li>Fleet overview</li><li>SatOps Agent + Approve</li></ul></div>
+    <div class="card"><h3>Demo</h3><ul><li>Canlı istifadə ardıcıllığı</li><li>Təhlükəsizlik qaydaları</li><li>Növbəti addımlar</li></ul></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">02 · Why we need it</p>
+  <h2>Niyə bu alət lazımdır</h2>
+  <p class="sub">Peyk əməliyyatında telemetriya fasiləsiz gəlir. Excel / skript / “gözlə baxmaq” gecikmə, buraxılmış xəbərdarlıq və izah olunmayan qərarlar yaradır.</p>
+  <div class="grid g3">
+    <div class="card"><h3>Həcm</h3><p>Battery, bus voltage, current, thermal — eyni anda bir neçə kanal. İnsan hər saniyəni izləyə bilməz.</p></div>
+    <div class="card"><h3>Kontekst</h3><p>Eclipse zamanı temperatur düşməsi gözləniləndir. Nominal rejimdə eyni siqnal anomaliyadır. Alət bunu mission mode ilə ayırır.</p></div>
+    <div class="card"><h3>Məsuliyyət</h3><p>AI özbaşına train/start/email etməməlidir. Operator təsdiqi olmadan təhlükəli əməliyyat yoxdur.</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">03 · What it solves</p>
+  <h2>Nə problemi həll edir</h2>
+  <table>
+    <thead><tr><th>Əvvəl</th><th>SDA v4.0 sonra</th></tr></thead>
+    <tbody>
+      <tr><td>CSV-lər ayrı-ayrı, status dağınıq</td><td>Hər kanal öz monitoring tab-ında; Home-da fleet statusu</td></tr>
+      <tr><td>Anomaliya “görünür / görünmür”</td><td>Warning / Critical / Healthy + drift + OBS limitləri</td></tr>
+      <tr><td>Model seçimi təsadüfi</td><td>Isolation Forest, LSTM, CNN, ARIMA və s. — tab üzrə train, metrics, compare</td></tr>
+      <tr><td>Chatbot uydurur</td><td>SatOps Agent canlı tool + lokal SOP; dəyişiklik yalnız Propose → Approve</td></tr>
+      <tr><td>Məlumat buluda gedir</td><td>Tam lokal: desktop + Ollama 127.0.0.1, air-gap</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide">
+  <p class="kicker">04 · Purpose</p>
+  <h2>Əsas məqsəd</h2>
+  <p class="sub">SDA v4.0 peyk telemetriyasını <b>real vaxtda müşahidə etmək</b>, anomaliyanı <b>aşkarlamaq</b>, operatora <b>izah etmək</b> və təsdiqlənmiş addımı <b>təklif etmək</b> üçündür.</p>
+  <div class="grid g3">
+    <div class="card"><h3>Detect</h3><p>Anomaly, drift, OBS pozuntusu, pattern / risk.</p></div>
+    <div class="card"><h3>Explain</h3><p>Niyə Warning? Mode-normal, yoxsa həqiqi anomaliya?</p></div>
+    <div class="card"><h3>Act (human)</h3><p>Retrain, alert, start/stop, SOP — yalnız operator Approve.</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">05 · How it works</p>
+  <h2>İş axını</h2>
+  <div class="flow">
+    <div class="step"><b>1</b><span>CSV / folder gətir</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>2</b><span>Monitoring tab yarat</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>3</b><span>Model train et</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>4</b><span>Start Monitoring</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>5</b><span>Fleet + alert</span></div>
+    <div class="arrow">→</div>
+    <div class="step"><b>6</b><span>SatOps təklif → Approve</span></div>
+  </div>
+  <p class="sub" style="margin-top:28px">Ask düyməsi monitoringi başlamır. Hər tab özündə <b>Start Monitoring</b> tələb edir. Agent yalnız draft yaradır.</p>
+</section>
+
+<section class="slide">
+  <p class="kicker">06 · Architecture</p>
+  <h2>Harada işləyir</h2>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Desktop (operator)</h3>
+      <ul>
+        <li>Windows · Python 3.10 · PyQt5</li>
+        <li><code>run.bat</code> → SDA v4.0 pəncərəsi</li>
+        <li>Sol nav: Home, tab-lar, Administration</li>
+        <li>RBAC: admin / analyst / viewer</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Local AI (air-gap)</h3>
+      <ul>
+        <li>Ollama yalnız 127.0.0.1</li>
+        <li>ToolHost :8765 (localhost)</li>
+        <li>Knowledge: PDF/MD → lokal RAG</li>
+        <li>Bulud LLM yoxdur — konfidensial telemetriya qalır maşında</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">07 · What it offers</p>
+  <h2>Alətin təklif etdiyi imkanlar</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Home</h3><ul><li>Fleet Overview</li><li>Tab status / snapshot</li><li>Pending retrain</li><li>SatOps Agent chat</li><li>Pending drafts Approve/Reject</li></ul></div>
+    <div class="card"><h3>Monitoring tab</h3><ul><li>Data source + schedule</li><li>Model Management</li><li>Start / Stop</li><li>Health, viz, alerts</li><li>Mission modes (FSM)</li></ul></div>
+    <div class="card"><h3>Administration</h3><ul><li>İstifadəçilər və rollar</li><li>Email SMTP</li><li>Audit / activity</li><li>Knowledge rebuild</li></ul></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">08 · Monitoring tabs</p>
+  <h2>Hər tab = bir telemetriya kanalı</h2>
+  <ul>
+    <li><b>Data source</b> — CSV və ya folder (məs. BatteryTemperature, BusVoltage, TotalBusCurrent).</li>
+    <li><b>Schedule</b> — Continuous (interval), Scheduled (UTC slot), On-Demand (bir cycle).</li>
+    <li><b>Models</b> — bir tab-da bir neçə model; train, metrics, remove.</li>
+    <li><b>Health</b> — Idle → Monitoring → Healthy / Warning / Critical.</li>
+    <li><b>OBS</b> — əməliyyat limitləri; pozuntu log-da görünür.</li>
+    <li><b>Email alert</b> — tab konfiqində; SMTP Administration-dan.</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <p class="kicker">09 · Models</p>
+  <h2>Analiz və ML seçimi</h2>
+  <p class="sub">UI-də 40+ model adı var. Əməliyyat üçün sabit backend-lər istifadə olunur (Isolation Forest, LSTM, CNN, ARIMA və s.).</p>
+  <div class="grid g3">
+    <div class="card"><h3>Classical</h3><p>Isolation Forest, LOF, One-Class SVM, IQR, Z-Score, XGBoost, Random Forest.</p></div>
+    <div class="card"><h3>Deep / sequence</h3><p>LSTM, LSTM-AE, CNN, Autoencoder, GRU — time-series üçün.</p></div>
+    <div class="card"><h3>Trend / fusion</h3><p>ARIMA, Prophet; multi-agent fusion (LSTM-AE + CNN + trend) bir qərara birləşir.</p></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">10 · Mission modes</p>
+  <h2>Eclipse ≠ anomaliya</h2>
+  <p class="sub">Hər tab-ın FSM rejimləri threshold-u genişləndirir və ya sıxır. M-LLM log-ları “mode-normal” vs həqiqi anomaliya kimi ayırır.</p>
+  <table>
+    <thead><tr><th>Mode</th><th>Nə baş verir</th></tr></thead>
+    <tbody>
+      <tr><td>Nominal</td><td>Standart həssaslıq (scale 1.0)</td></tr>
+      <tr><td>Eclipse</td><td>Gözlənilən thermal/power sapması — false positive azalır (məs. ×1.5)</td></tr>
+      <tr><td>Safe mode / maneuver</td><td>Daha sərt və ya fərqli hədd; tab konfiqində tənzimlənir</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide">
+  <p class="kicker">11 · SatOps Agent</p>
+  <h2>Operator köməkçisi — chatbot deyil</h2>
+  <div class="grid g2">
+    <div class="card">
+      <h3>Danışır</h3>
+      <p>Salam / sual — təbii cavab. Fleet report yalnız ops sualında.</p>
+    </div>
+    <div class="card">
+      <h3>Baxır</h3>
+      <p>Live tab status, metrics, explain_anomaly, knowledge (SOP/PDF).</p>
+    </div>
+    <div class="card">
+      <h3>Təklif edir</h3>
+      <p>Create tab, train, start/stop, alert, SOP Word draft — Pending Agent Drafts.</p>
+    </div>
+    <div class="card">
+      <h3>İcra etmir</h3>
+      <p>Sən Approve etmədən heç nə yazılmır / start olunmur / email getmir.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="kicker">12 · Safety</p>
+  <h2>Propose → Approve</h2>
+  <p class="sub">Bu, departament üçün əsas qaydadır: AI məsləhətçidir, komanda rəhbəri deyil.</p>
+  <ul>
+    <li>Agent <code>propose_*</code> çağırır → draft Home → AI Assistant → Pending Agent Drafts.</li>
+    <li>Operator <b>Approve</b> və ya <b>Reject</b>.</li>
+    <li>Retrain siqnalları ayrıca Acknowledge tələb edir.</li>
+    <li>Lokal knowledge: faylları <code>data/knowledge</code>-ə qoy, <b>Rebuild Knowledge</b>.</li>
+    <li>Token/API yalnız localhost; JWT /v1 üstünlük.</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <p class="kicker">13 · How to use</p>
+  <h2>Canlı demo — 8 addım</h2>
+  <ol style="font-size:17px;line-height:1.55;margin:0;padding-left:22px">
+    <li><b>run.bat</b> — login (admin / analyst).</li>
+    <li><b>Home → Fleet Overview</b> — mövcud tab-ların statusu.</li>
+    <li><b>+ New tab</b> — məs. <code>data/BatteryTemperature.csv</code>, Continuous, 1–2 model.</li>
+    <li>Tabı aç → <b>Model Management → Train</b> (ən azı bir model).</li>
+    <li><b>Start Monitoring</b> — status Idle-dan çıxmalıdır.</li>
+    <li>Home-da health: Healthy / Warning / Critical.</li>
+    <li><b>AI Assistant</b> — “which tab needs attention?” və ya “hola” (söhbət, briefing yox).</li>
+    <li>Əgər draft varsa → <b>Approve</b>. SOP/PDF üçün Rebuild Knowledge.</li>
+  </ol>
+</section>
+
+<section class="slide">
+  <p class="kicker">14 · Demo talking points</p>
+  <h2>Təqdimat zamanı göstər</h2>
+  <table>
+    <thead><tr><th>Ekran</th><th>Nə de</th></tr></thead>
+    <tbody>
+      <tr><td>Login + sidebar</td><td>Lokal, Azercosmos logo, rol görünür</td></tr>
+      <tr><td>Fleet Overview</td><td>Bütün kanallar bir baxışda</td></tr>
+      <tr><td>Bir tab</td><td>Train olmadan Start işləmir — məqsədli</td></tr>
+      <tr><td>Warning + eclipse</td><td>Mode-normal izahı (false alarm yox)</td></tr>
+      <tr><td>SatOps Agent</td><td>Sual → tool/knowledge; mutating → Approve</td></tr>
+      <tr><td>Administration</td><td>User, email, audit — kim nə etdi</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide">
+  <p class="kicker">15 · Roles</p>
+  <h2>Kim nə edə bilər</h2>
+  <table>
+    <thead><tr><th>Rol</th><th>Görür</th><th>Edə bilər</th><th>Edə bilməz</th></tr></thead>
+    <tbody>
+      <tr><td>Viewer</td><td>Status, data baxışı</td><td>Oxumaq</td><td>Train, tab silmək, user idarə</td></tr>
+      <tr><td>Analyst</td><td>Hər şey (ops)</td><td>Import, tab yaratmaq, train, alert ack</td><td>User silmək, production model qaydası admin-də</td></tr>
+      <tr><td>Admin</td><td>Hər şey</td><td>User, SMTP, tab silmək, sistem</td><td>—</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="slide">
+  <p class="kicker">16 · What it is not</p>
+  <h2>Sərhədlər (dürüst)</h2>
+  <ul>
+    <li>Bulud LLM / ChatGPT bağlantısı yoxdur — qəsdən.</li>
+    <li>Digital twin / orbital simulator yoxdur — real telemetriya + lokal model.</li>
+    <li>Agent “Start all tabs” düyməsi deyil; hər tab ayrıca start olunur.</li>
+    <li>Kiçik lokal model səhv route edə bilər; Approve həmişə son sözdür.</li>
+    <li>Email yalnız konfiqurasiya olunmuş SMTP ilə işləyir.</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <p class="kicker">17 · Close</p>
+  <h2>Bir cümlə</h2>
+  <p class="sub" style="font-size:22px;color:var(--ink);max-width:900px">
+    SDA v4.0 peyk telemetriyasını lokal olaraq izləyir, anomaliyanı tapır, izah edir və SatOps Agent vasitəsilə yalnız operator təsdiqindən sonra hərəkətə keçir.
+  </p>
+  <div class="card" style="max-width:640px;margin-top:12px">
+    <h3>Növbəti addım</h3>
+    <p>Canlı demo: bir CSV tab + train + Start Monitoring + agent sualı + Approve.</p>
+  </div>
+</section>
+
+</div>
+<div class="bar">
+  <span>SDA v4.0 · Department briefing</span>
+  <span>
+    <button type="button" id="prev">← Prev</button>
+    <span id="pos">1 / 1</span>
+    <button type="button" id="next">Next →</button>
+    &nbsp; F11 full screen · P print
+  </span>
+</div>
+<script>
+  const slides = [...document.querySelectorAll(".slide")];
+  let i = 0;
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle("on", k === i));
+    document.getElementById("pos").textContent = (i + 1) + " / " + slides.length;
+  }
+  document.getElementById("prev").onclick = () => show(i - 1);
+  document.getElementById("next").onclick = () => show(i + 1);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") { e.preventDefault(); show(i + 1); }
+    if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); show(i - 1); }
+    if (e.key === "Home") show(0);
+    if (e.key === "End") show(slides.length - 1);
+  });
+  show(0);
+</script>
+</body>
+</html>

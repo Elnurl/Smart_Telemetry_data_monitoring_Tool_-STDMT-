@@ -1,6 +1,6 @@
 """Multi-LLM nodes — sequential roles on one local model (8GB VRAM safe).
 
-R-LLM routes → M-LLM summarizes logs → RA-LLM (tools) or C-LLM (knowledge).
+R-LLM routes → chat, or M-LLM + RA-LLM (tools) / C-LLM (knowledge).
 Only one Ollama model is loaded; nodes differ by system prompt + call order.
 """
 
@@ -11,60 +11,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
 
-from app.agent.prompts import CLLM_PROMPT, MLLM_PROMPT, RALLM_PROMPT, RLLM_PROMPT
+from app.agent.ollama_client import DEFAULT_OLLAMA_MODEL
+from app.agent.prompts import CHAT_PROMPT, CLLM_PROMPT, MLLM_PROMPT, RALLM_PROMPT, RLLM_PROMPT
 
 logger = logging.getLogger("STDMS.Agent.Nodes")
 
-Route = Literal["tool", "knowledge"]
-
-_TOOL_HINTS = (
-    "create tab",
-    "create a tab",
-    "new tab",
-    "train",
-    "propose",
-    "start monitor",
-    "start monitoring",
-    "stop monitor",
-    "fleet",
-    "which tab",
-    "needs attention",
-    "alert",
-    "drift",
-    "inspect",
-    "best model",
-    "compare model",
-    "watchlist",
-    "list tabs",
-    "status of",
-    "run anomaly",
-    "approve",
-    "remove model",
-    "from data/",
-    ".csv",
-)
-
-_KNOWLEDGE_HINTS = (
-    "procedure",
-    "sop",
-    "what is",
-    "what are",
-    "how does",
-    "how do",
-    "hardware",
-    "software",
-    "manual",
-    "documentation",
-    "runbook",
-    "why is",
-    "why are",
-    "why does",
-    "mode-normal",
-    "eclipse procedure",
-    "according to",
-    "in the sop",
-    "knowledge",
-)
+Route = Literal["tool", "knowledge", "chat"]
 
 
 @dataclass
@@ -88,23 +40,17 @@ class RALLMContext:
     fsm_mode: str = "nominal"
     scale: float = 1.0
     rag_context: list[dict[str, Any]] = field(default_factory=list)
+    graph_memory: list[dict[str, Any]] = field(default_factory=list)
 
 
-def heuristic_route(query: str) -> Route:
-    """Deterministic router used offline and as LLM fallback."""
-    q = (query or "").strip().lower()
-    if not q:
-        return "tool"
-    knowledge_score = sum(1 for h in _KNOWLEDGE_HINTS if h in q)
-    tool_score = sum(1 for h in _TOOL_HINTS if h in q)
-    # "why is … warnings/anomalies" is knowledge (FSM / SOP explanation)
-    if knowledge_score > tool_score:
-        return "knowledge"
-    if tool_score > 0:
-        return "tool"
-    if any(w in q for w in ("why", "what", "how", "procedure", "sop", "explain")):
-        return "knowledge"
-    return "tool"
+def heuristic_route(query: str, *, host: Any = None) -> Route:
+    """Deterministic router used offline and as LLM fallback.
+
+    Routes from the situation (live tab vs procedure vs chat), not command verbs.
+    """
+    from app.agent.ops_intent import classify_ops_intent, route_for_intent
+
+    return route_for_intent(classify_ops_intent(query, host=host))  # type: ignore[return-value]
 
 
 def _parse_route_token(text: str) -> Optional[Route]:
@@ -117,10 +63,14 @@ def _parse_route_token(text: str) -> Optional[Route]:
             return "tool"
         if token in ("knowledge", "rag", "docs", "sop"):
             return "knowledge"
+        if token in ("chat", "talk", "conversation", "chitchat"):
+            return "chat"
     if "knowledge" in raw and "tool" not in raw:
         return "knowledge"
     if "tool" in raw:
         return "tool"
+    if "chat" in raw:
+        return "chat"
     return None
 
 
@@ -133,6 +83,37 @@ def _format_rag(hits: list[dict[str, Any]], *, limit: int = 6) -> str:
         snippet = (hit.get("snippet") or hit.get("text") or "").strip()
         parts.append(f"- {title}: {snippet[:400]}")
     return "\n".join(parts)
+
+
+def _format_graph_memory(hits: list[dict[str, Any]], *, limit: int = 10) -> str:
+    if not hits:
+        return "(no graph memory hits)"
+    parts: list[str] = []
+    for hit in hits[:limit]:
+        title = hit.get("title") or hit.get("id") or "node"
+        snippet = (hit.get("snippet") or "").strip()
+        parts.append(f"- {title}: {snippet[:300]}")
+    return "\n".join(parts)
+
+
+def _recall_graph_memory(
+    query: str,
+    *,
+    host: Any = None,
+    tab_id: Optional[str] = None,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    """Sync (throttled) + recall from GraphMemoryStore; never raises."""
+    try:
+        from app.agent.memory import get_graph_memory, sync_fleet_throttled
+
+        store = get_graph_memory()
+        if host is not None:
+            sync_fleet_throttled(store, host)
+        return list(store.recall(query or "", tab_id=tab_id, limit=limit) or [])
+    except Exception as exc:
+        logger.warning("graph memory recall failed: %s", exc)
+        return []
 
 
 def _chat(
@@ -173,58 +154,36 @@ def _chat(
 
 
 class RLLMNode:
-    """Routing node — returns only tool | knowledge."""
+    """Routing node — returns tool | knowledge | chat."""
 
     def __init__(
         self,
         *,
         ollama_url: str = "http://127.0.0.1:11434",
-        model: str = "qwen3:8b",
+        model: str = DEFAULT_OLLAMA_MODEL,
         allow_llm: bool = True,
     ):
         self.ollama_url = ollama_url
         self.model = model
         self.allow_llm = bool(allow_llm)
 
-    def route(self, query: str) -> Route:
-        heuristic = heuristic_route(query)
-        q = (query or "").strip().lower()
-        # Strong intents must not be overturned by a chatty router model
-        strong_knowledge = any(
-            h in q
-            for h in (
-                "why is",
-                "why are",
-                "why does",
-                "procedure",
-                "sop",
-                "what is the",
-                "what are the",
-                "mode-normal",
-            )
-        )
-        strong_tool = any(
-            h in q
-            for h in (
-                "create tab",
-                "create a tab",
-                "which tab",
-                "needs attention",
-                "from data/",
-                ".csv",
-                "train model",
-                "start monitoring",
-            )
-        )
-        if strong_knowledge and not strong_tool:
-            return "knowledge"
-        if strong_tool and not strong_knowledge:
+    def route(self, query: str, *, host: Any = None) -> Route:
+        from app.agent.ops_intent import OpsIntent, classify_ops_intent, route_for_intent
+
+        intent = classify_ops_intent(query, host=host)
+        forced = route_for_intent(intent)
+        # Live / write / mutate must not be overturned by a chatty router model
+        if intent not in (OpsIntent.CHAT, OpsIntent.KNOWLEDGE):
             return "tool"
+        if intent == OpsIntent.KNOWLEDGE:
+            return "knowledge"
+        if intent == OpsIntent.CHAT:
+            return "chat"
 
         if self.allow_llm:
             text = _chat(
                 system=RLLM_PROMPT,
-                user=f"Query: {query}\nReply with exactly one word: tool or knowledge.",
+                user=f"Query: {query}\nReply with exactly one word: tool, knowledge, or chat.",
                 ollama_url=self.ollama_url,
                 model=self.model,
                 num_predict=16,
@@ -233,7 +192,7 @@ class RLLMNode:
             parsed = _parse_route_token(text or "")
             if parsed:
                 return parsed
-        return heuristic
+        return forced  # type: ignore[return-value]
 
 
 class MLLMNode:
@@ -243,7 +202,7 @@ class MLLMNode:
         self,
         *,
         ollama_url: str = "http://127.0.0.1:11434",
-        model: str = "qwen3:8b",
+        model: str = DEFAULT_OLLAMA_MODEL,
         allow_llm: bool = True,
         log_monitor: Any = None,
     ):
@@ -333,7 +292,7 @@ class RALLMNode:
         self,
         *,
         ollama_url: str = "http://127.0.0.1:11434",
-        model: str = "qwen3:8b",
+        model: str = DEFAULT_OLLAMA_MODEL,
         allow_llm: bool = True,
     ):
         self.ollama_url = ollama_url
@@ -345,12 +304,14 @@ class RALLMNode:
         if not isinstance(snap_txt, str):
             snap_txt = str(snap_txt)[:2500]
         rag_txt = _format_rag(context.rag_context)
+        graph_txt = _format_graph_memory(context.graph_memory)
         system = RALLM_PROMPT.format(
             snapshot=snap_txt,
             log_summary=context.log_summary or "(none)",
             fsm_mode=context.fsm_mode,
             scale=context.scale,
             rag_context=rag_txt,
+            graph_memory=graph_txt,
         )
         # Append tool policy from main system prompt builder (mutators allowed)
         try:
@@ -360,24 +321,31 @@ class RALLMNode:
         except Exception:
             pass
 
-        user = (
-            f"Operator: {context.query}\n\n"
-            f"[FSM] mode={context.fsm_mode} scale={context.scale:g}\n"
+        focus = {}
+        if isinstance(context.snapshot, dict):
+            focus = context.snapshot.get("focus") if isinstance(context.snapshot.get("focus"), dict) else context.snapshot
+        extra_context = (
+            f"[Resolved tab] title={focus.get('title') or 'unknown'} "
+            f"tab_id={focus.get('tab_id') or 'unknown'}\n"
+            f"[FSM] mission_mode={context.fsm_mode} scale={context.scale:g} "
+            "(mission mode is NOT a tab name — never pass it as tab_id)\n"
             f"[M-LLM] {context.log_summary or '(no logs)'}\n"
             "If logs say mode-normal, do not treat those as anomalies.\n"
-            "Use tools when needed, then answer with Observation / Analysis / Recommendation."
+            "If this is conversation, reply naturally — no tools, no briefing format.\n"
+            "If this is an ops question, call the live tools now. Do not say you will call them later."
         )
 
         if host is not None and self.allow_llm:
             from app.agent.function_calling import run_function_calling
 
             fc = run_function_calling(
-                user,
+                context.query,
                 host=host,
                 ollama_url=self.ollama_url,
                 model=self.model,
                 include_mutating=True,
                 system_prompt=system,
+                extra_context=extra_context,
             )
             return AgentDecision(
                 reply=str(fc.get("reply") or "").strip() or self._offline_reason(context),
@@ -390,6 +358,25 @@ class RALLMNode:
                 fsm_mode=context.fsm_mode,
                 threshold_scale=context.scale,
             )
+
+        if host is not None:
+            from app.agent.ops_intent import LIVE_INTENTS, classify_ops_intent, fulfill_intent
+
+            intent = classify_ops_intent(context.query, host=host)
+            if intent in LIVE_INTENTS:
+                filled = fulfill_intent(context.query, host, intent=intent)
+                if (filled.get("reply") or "").strip():
+                    return AgentDecision(
+                        reply=str(filled.get("reply") or "").strip(),
+                        route="tool",
+                        tool_trace=list(filled.get("tool_trace") or []),
+                        llm_used=False,
+                        outcome=str(filled.get("outcome") or "function_calling"),
+                        node="RA-LLM",
+                        log_summary=context.log_summary,
+                        fsm_mode=context.fsm_mode,
+                        threshold_scale=context.scale,
+                    )
 
         # Offline / no host: deterministic FSM-aware note
         return AgentDecision(
@@ -440,12 +427,17 @@ class CLLMNode:
     """Knowledge node — RAG + FSM/log context, no tool calling."""
 
     MISSING = "Bu məlumat knowledge bazasında yoxdur"
+    IDENTITY = (
+        "I am SatOps Agent. I help with your monitoring tabs: "
+        "live status, procedures, and start/train proposals that you approve. "
+        "What do you need?"
+    )
 
     def __init__(
         self,
         *,
         ollama_url: str = "http://127.0.0.1:11434",
-        model: str = "qwen3:8b",
+        model: str = DEFAULT_OLLAMA_MODEL,
         allow_llm: bool = True,
     ):
         self.ollama_url = ollama_url
@@ -561,13 +553,13 @@ class MultiNodeResult:
 
 
 class MultiNodePipeline:
-    """Sequential R → M → (RA | C) on a single local model."""
+    """Sequential R → M → (RA | C | chat) on a single local model."""
 
     def __init__(
         self,
         *,
         ollama_url: str = "http://127.0.0.1:11434",
-        model: str = "qwen3:8b",
+        model: str = DEFAULT_OLLAMA_MODEL,
         allow_llm: bool = True,
         log_monitor: Any = None,
     ):
@@ -583,9 +575,42 @@ class MultiNodePipeline:
         self.cllm = CLLMNode(ollama_url=ollama_url, model=model, allow_llm=allow_llm)
         self.log_monitor = log_monitor
 
+    def _chat_reply(self, query: str) -> tuple[str, bool]:
+        """Conversational turn — no fleet snapshot, no briefing template."""
+        if not self.allow_llm:
+            return CLLMNode.IDENTITY, False
+        text = _chat(
+            system=CHAT_PROMPT,
+            user=query,
+            ollama_url=self.rllm.ollama_url,
+            model=self.rllm.model,
+            num_predict=180,
+            temperature=0.5,
+        )
+        if text:
+            return text, True
+        return CLLMNode.IDENTITY, False
+
     def run(self, query: str, *, host: Any = None) -> MultiNodeResult:
-        route = self.rllm.route(query)
+        from app.agent.ops_intent import strip_node_traces
+
+        route = self.rllm.route(query, host=host)
         node_trace = [f"[R-LLM] routing → {route}"]
+
+        if route == "chat":
+            body, llm_used = self._chat_reply(query)
+            reply = strip_node_traces(body)
+            return MultiNodeResult(
+                reply=reply,
+                route="chat",
+                node="chat",
+                tool_trace=[],
+                llm_used=llm_used,
+                outcome="chat",
+                log_summary="",
+                node_trace=node_trace + ["[chat] conversational — skipped M/RA"],
+                agent_mode="chat",
+            )
 
         fsm_mode, scale, snap, tab_id = self._fleet_fsm_context(host, query)
         log_summary = self.mllm.summarize(
@@ -615,7 +640,7 @@ class MultiNodePipeline:
                     )
                 except Exception:
                     llm_used = False
-            reply = "\n".join(node_trace + [f"[C-LLM]\n{answer}"])
+            reply = strip_node_traces(answer)
             return MultiNodeResult(
                 reply=reply,
                 route="knowledge",
@@ -637,6 +662,15 @@ class MultiNodePipeline:
         except Exception:
             rag_hits = []
 
+        graph_hits: list[dict[str, Any]] = []
+        try:
+            tab_hint = None
+            if isinstance(snap, dict):
+                tab_hint = snap.get("tab_id")
+            graph_hits = _recall_graph_memory(query, host=host, tab_id=tab_hint, limit=8)
+        except Exception:
+            graph_hits = []
+
         decision = self.rallm.reason(
             RALLMContext(
                 query=query,
@@ -645,6 +679,7 @@ class MultiNodePipeline:
                 fsm_mode=fsm_mode,
                 scale=scale,
                 rag_context=rag_hits,
+                graph_memory=graph_hits,
             ),
             host=host,
         )
@@ -659,12 +694,7 @@ class MultiNodePipeline:
             else "[RA-LLM] tools used: (none)"
         )
         node_trace.append(tools_line)
-        body = decision.reply or ""
-        # Avoid duplicating node headers if FC already included them
-        if not body.lstrip().startswith("[R-LLM]"):
-            reply = "\n".join(node_trace + [body])
-        else:
-            reply = body
+        reply = strip_node_traces(decision.reply or "")
         return MultiNodeResult(
             reply=reply,
             route="tool",
@@ -692,18 +722,21 @@ class MultiNodePipeline:
             except Exception:
                 tabs = []
 
-        q = (query or "").lower()
         chosen: dict[str, Any] | None = None
-        for entry in tabs:
-            title = str(entry.get("title") or "").lower()
-            snap = entry.get("snapshot") or {}
-            mode = str(snap.get("mission_mode") or "").lower()
-            if title and title in q:
-                chosen = entry
-                break
-            if mode and mode in q:
-                chosen = entry
-                break
+        try:
+            from app.agent.ops_intent import resolve_tab
+
+            resolved = resolve_tab(query, host)
+        except Exception:
+            resolved = None
+        if resolved is not None:
+            for entry in tabs:
+                if str(entry.get("tab_id") or "") == resolved.tab_id:
+                    chosen = entry
+                    break
+                if str(entry.get("title") or "").lower() == resolved.title.lower():
+                    chosen = entry
+                    break
         if chosen is None and tabs:
             # Prefer elevated health, else first
             for entry in tabs:

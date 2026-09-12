@@ -322,6 +322,21 @@ AGENT_TOOLS: list[dict[str, Any]] = [
         "phase": 3,
         "mutates": False,
     },
+    {
+        "name": "search_agent_memory",
+        "description": (
+            "Search operational graph memory (tabs, drafts, retrain signals, past decisions, "
+            "mission modes). Read-only; complements search_knowledge (SOPs)."
+        ),
+        "parameters": {"query": "str", "tab_id": "str"},
+        "properties": {
+            "query": {"type": "string", "description": "What to recall from agent memory"},
+            "tab_id": {"type": "string", "description": "Optional tab focus"},
+        },
+        "required": ["query"],
+        "phase": 3,
+        "mutates": False,
+    },
     # --- Propose (pending human approval) ---
     {
         "name": "propose_retrain",
@@ -1019,6 +1034,30 @@ def request_monitor_cycle(tab_id: str, host: Optional[ToolHost] = None) -> dict[
     return _require_host(host).queue_monitor_cycle(tab_id)
 
 
+def search_agent_memory(
+    query: str,
+    tab_id: Optional[str] = None,
+    host: Optional[ToolHost] = None,
+) -> dict[str, Any]:
+    """Recall operational facts from the graph memory store (NetworkX backend)."""
+    try:
+        from app.agent.memory import get_graph_memory, sync_fleet_throttled
+
+        store = get_graph_memory()
+        if host is not None:
+            sync_fleet_throttled(store, host)
+        hits = store.recall(query or "", tab_id=tab_id or None, limit=12)
+        return {
+            "ok": True,
+            "hits": hits,
+            "count": len(hits),
+            "stats": store.stats(),
+            "source": "graph_memory",
+        }
+    except Exception as exc:
+        return {"ok": False, "hits": [], "count": 0, "error": str(exc), "source": "graph_memory"}
+
+
 def search_knowledge(
     query: str,
     host: Optional[ToolHost] = None,
@@ -1461,15 +1500,9 @@ def _resolve_tab_id(
             "matches": 1,
         }
 
-    if not title_q and tid:
-        return {
-            "ok": False,
-            "error": "tab_not_found",
-            "tab_id": tid,
-            "available": [
-                {"tab_id": t.get("tab_id"), "title": t.get("title")} for t in tabs
-            ],
-        }
+    # LLM often passes a tab title or mission mode as tab_id
+    if tid and not title_q:
+        title_q = tid
 
     if not title_q:
         return {
@@ -1918,11 +1951,14 @@ _HANDLERS: dict[str, ToolHandler] = {
     "remove_watchlist_tab": lambda tab_id=None, tab_title=None, host=None, **_: remove_watchlist_tab(
         tab_id=tab_id, tab_title=tab_title, host=host
     ),
-    "run_anomaly_check": lambda tab_id, host=None, **_: run_anomaly_check(tab_id, host=host),
-    "run_forecast": lambda tab_id, host=None, **_: run_forecast(tab_id, host=host),
-    "check_drift": lambda tab_id, host=None, **_: check_drift(tab_id, host=host),
+    "run_anomaly_check": lambda tab_id=None, host=None, **_: run_anomaly_check(tab_id, host=host),
+    "run_forecast": lambda tab_id=None, host=None, **_: run_forecast(tab_id, host=host),
+    "check_drift": lambda tab_id=None, host=None, **_: check_drift(tab_id, host=host),
     "get_pending_signals": lambda host=None, **_: get_pending_signals(host=host),
     "request_monitor_cycle": lambda tab_id, host=None, **_: request_monitor_cycle(tab_id, host=host),
+    "search_agent_memory": lambda query="", tab_id=None, host=None, **_: search_agent_memory(
+        str(query or ""), tab_id=tab_id, host=host
+    ),
     "search_knowledge": lambda query="", segment="auto", host=None, **_: search_knowledge(
         str(query or ""), host=host, segment=str(segment or "auto")
     ),

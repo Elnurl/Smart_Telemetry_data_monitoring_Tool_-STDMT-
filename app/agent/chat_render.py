@@ -189,8 +189,18 @@ def render_tool_badges(tools: Sequence[Dict[str, Any]]) -> str:
     return "".join(parts)
 
 
+_NODE_TRACE_RE = re.compile(
+    r"(?im)^\s*\[(?:R-LLM|M-LLM|C-LLM|RA-LLM|chat)\][^\n]*\n?",
+)
+
+
+def strip_node_traces(text: str) -> str:
+    return _NODE_TRACE_RE.sub("", text or "").strip()
+
+
 def render_body_html(text: str) -> str:
     """Render agent/user body: OAR sections when present, else inline markdown."""
+    text = strip_node_traces(text)
     tools_from_text, rest = parse_tools_prefix(text)
     # tools_from_text is used by callers via parse_tools_prefix; body uses rest
     sections = split_oar_sections(rest)
@@ -249,7 +259,7 @@ def render_message_html(
         avatar_role = "system"
 
     tools_list = list(tools or [])
-    body_src = text or ""
+    body_src = strip_node_traces(text or "")
     if not tools_list:
         parsed, body_src = parse_tools_prefix(body_src)
         tools_list = parsed

@@ -123,173 +123,22 @@ def to_json_compatible(value):
     return value
 
 
-# Unified model catalog and mapping layer.
-# "Touched 44 models" are exposed in UI; advanced models are resolved to
-# implemented runtime backends for stable operation.
-TOUCHED_44_MODEL_NAMES = [
-    "Isolation Forest",
-    "Local Outlier Factor",
-    "One-Class SVM",
-    "Random Forest",
-    "Incremental Isolation Forest",
-    "XGBoost",
-    "Autoencoder",
-    "LSTM",
-    "GRU",
-    "LSTM-AE",
-    "TCN-AE",
-    "Transformer-AE",
-    "VAE",
-    "GDN",
-    "MTAD-GAT",
-    "Deep SVDD",
-    "CNN",
-    "ARIMA",
-    "SARIMA",
-    "Prophet",
-    "IQR (Interquartile Range)",
-    "Z-Score",
-    "Weibull RUL",
-    "Cox PH RUL",
-    "XGBoost RUL",
-    "Random Forest RUL",
-    "TFT",
-    "N-BEATS",
-    "N-HiTS",
-    "Bidirectional LSTM + MC Dropout",
-    "PINNs",
-    "DeepHit",
-    "DRSA",
-    "Mamba",
-    "TS2Vec",
-    "SimMTM",
-    "TNC",
-    "CoST",
-    "DevNet",
-    "REPEN",
-    "TimesFM",
-    "Moirai",
-    "Lag-Llama",
-    "Federated Learning",
-]
-
-MODEL_DISPLAY_TO_INTERNAL = {
-    "Isolation Forest": "isolation_forest",
-    "Enhanced Isolation Forest": "enhanced_isolation_forest",
-    "Local Outlier Factor": "lof",
-    "One-Class SVM": "ocsvm",
-    "Ensemble Voting": "ensemble_voting",
-    "Ensemble Stacking": "ensemble_stacking",
-    "Adaptive Threshold Ensemble": "adaptive_threshold",
-    "Random Forest": "random_forest",
-    "Incremental Isolation Forest": "incremental_isolation_forest",
-    "River Anomaly": "river_anomaly",
-    "Reinforcement Learning Detector": "reinforcement_learning",
-    "XGBoost": "xgboost",
-    "Autoencoder": "autoencoder",
-    "LSTM": "lstm",
-    "GRU": "gru",
-    "LSTM-AE": "lstm_ae",
-    "TCN-AE": "tcn_ae",
-    "Transformer-AE": "transformer_ae",
-    "VAE": "vae",
-    "GDN": "gdn",
-    "MTAD-GAT": "mtad_gat",
-    "Deep SVDD": "deep_svdd",
-    "CNN": "cnn",
-    "ARIMA": "arima",
-    "SARIMA": "sarima",
-    "Prophet": "prophet",
-    "IQR (Interquartile Range)": "iqr_(interquartile_range)",
-    "Z-Score": "z-score",
-    "Weibull RUL": "weibull_rul",
-    "Cox PH RUL": "cox_ph_rul",
-    "XGBoost RUL": "xgboost_rul",
-    "Random Forest RUL": "random_forest_rul",
-    "TFT": "tft",
-    "N-BEATS": "n_beats",
-    "N-HiTS": "n_hits",
-    "Bidirectional LSTM + MC Dropout": "bilstm_mc_dropout",
-    "PINNs": "pinns",
-    "DeepHit": "deephit",
-    "DRSA": "drsa",
-    "Mamba": "mamba",
-    "TS2Vec": "ts2vec",
-    "SimMTM": "simmtm",
-    "TNC": "tnc",
-    "CoST": "cost",
-    "DevNet": "devnet",
-    "REPEN": "repen",
-    "TimesFM": "timesfm",
-    "Moirai": "moirai",
-    "Lag-Llama": "lag_llama",
-    "Federated Learning": "federated_learning",
-}
-
-MODEL_INTERNAL_FALLBACK = {
-    "incremental_isolation_forest": "isolation_forest",
-    "enhanced_isolation_forest": "isolation_forest",
-    "river_anomaly": "isolation_forest",
-    "reinforcement_learning": "isolation_forest",
-    "ensemble_voting": "isolation_forest",
-    "ensemble_stacking": "random_forest",
-    "adaptive_threshold": "isolation_forest",
-    "lstm_ae": "lstm",
-    "tcn_ae": "autoencoder",
-    "transformer_ae": "autoencoder",
-    "vae": "autoencoder",
-    "gdn": "autoencoder",
-    "mtad_gat": "autoencoder",
-    "deep_svdd": "ocsvm",
-    "cnn": "autoencoder",
-    "arima": "prophet",
-    "sarima": "prophet",
-    "weibull_rul": "prophet",
-    "cox_ph_rul": "xgboost",
-    "xgboost_rul": "xgboost",
-    "random_forest_rul": "random_forest",
-    "tft": "prophet",
-    "n_beats": "prophet",
-    "n_hits": "prophet",
-    "bilstm_mc_dropout": "lstm",
-    "pinns": "prophet",
-    "deephit": "xgboost",
-    "drsa": "xgboost",
-    "mamba": "lstm",
-    "ts2vec": "isolation_forest",
-    "simmtm": "isolation_forest",
-    "tnc": "isolation_forest",
-    "cost": "isolation_forest",
-    "devnet": "isolation_forest",
-    "repen": "isolation_forest",
-    "timesfm": "prophet",
-    "moirai": "prophet",
-    "lag_llama": "prophet",
-    "federated_learning": "isolation_forest",
-}
-
-
-def get_supported_model_names():
-    """Return the UI model list for the 44 touched models."""
-    return list(TOUCHED_44_MODEL_NAMES)
-
-
-def to_internal_model_type(model_display_name):
-    """Normalize display model name to internal key."""
-    if model_display_name in MODEL_DISPLAY_TO_INTERNAL:
-        return MODEL_DISPLAY_TO_INTERNAL[model_display_name]
-    return str(model_display_name).strip().lower().replace(" ", "_")
-
-
-def resolve_runtime_model_type(internal_model_type):
-    """Resolve advanced aliases to executable backend model types."""
-    return MODEL_INTERNAL_FALLBACK.get(internal_model_type, internal_model_type)
+# Slice C Wave 1: model catalog
+from app.models.model_types import (
+    MODEL_DISPLAY_TO_INTERNAL,
+    MODEL_INTERNAL_FALLBACK,
+    TOUCHED_44_MODEL_NAMES,
+    catalog_display_name,
+    format_model_catalog_label,
+    get_supported_model_names,
+    resolve_runtime_model_type,
+    to_internal_model_type,
+)
 
 # Incremental modular refactor imports (backward-compatible fallback below).
 SettingsManager = None
 AppServiceLayer = None
 ServiceLayerContext = None
-ModularAlertPolicyManager = None
 modular_load_alert_routing_config = None
 modular_write_audit_event = None
 modular_get_runtime_source_context = None
@@ -307,7 +156,6 @@ export_fleet_mission_report = None
 try:
     from app.config.settings import SettingsManager
     from app.services.service_layer import AppServiceLayer, ServiceLayerContext
-    from app.alerts.policy import AlertPolicyManager as ModularAlertPolicyManager
     from app.alerts.policy import load_alert_routing_config as modular_load_alert_routing_config
     from app.storage.audit import (
         write_audit_event as modular_write_audit_event,
@@ -329,208 +177,8 @@ if ModularModelRegistry is not None:
     ModelRegistry = ModularModelRegistry
 
 
-class ObservabilityManager:
-    """Lightweight observability manager: traces, metrics, and health state."""
-    def __init__(self, service_name="telemetry_system"):
-        self.service_name = service_name
-        self.started_at = time.time()
-        self._lock = threading.Lock()
-        self._counters = defaultdict(float)
-        self._gauges = defaultdict(float)
-        self._summaries_sum = defaultdict(float)
-        self._summaries_count = defaultdict(int)
-        self._recent_errors = []
-        self._http_server = None
-        self._http_thread = None
-    
-    @staticmethod
-    def _make_key(metric_name, labels=None):
-        labels = labels or {}
-        return metric_name, tuple(sorted((str(k), str(v)) for k, v in labels.items()))
-    
-    @staticmethod
-    def _labels_to_text(labels_tuple):
-        if not labels_tuple:
-            return ""
-        escaped = []
-        for key, value in labels_tuple:
-            safe_value = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-            escaped.append(f'{key}="{safe_value}"')
-        return "{" + ",".join(escaped) + "}"
-    
-    def inc_counter(self, metric_name, value=1.0, labels=None):
-        key = self._make_key(metric_name, labels)
-        with self._lock:
-            self._counters[key] += float(value)
-    
-    def set_gauge(self, metric_name, value, labels=None):
-        key = self._make_key(metric_name, labels)
-        with self._lock:
-            self._gauges[key] = float(value)
-    
-    def observe(self, metric_name, value, labels=None):
-        key = self._make_key(metric_name, labels)
-        with self._lock:
-            self._summaries_sum[key] += float(value)
-            self._summaries_count[key] += 1
-    
-    def start_span(self, operation, attributes=None):
-        return {
-            "trace_id": uuid.uuid4().hex,
-            "span_id": uuid.uuid4().hex[:16],
-            "operation": operation,
-            "start_time": time.time(),
-            "attributes": attributes or {}
-        }
-    
-    def end_span(self, span, status="ok", error=None, attributes=None):
-        if not span:
-            return
-        duration_s = max(0.0, time.time() - span["start_time"])
-        op = span.get("operation", "unknown")
-        
-        labels = {"operation": op, "status": status}
-        self.inc_counter("app_operations_total", 1, labels=labels)
-        self.observe("app_operation_duration_seconds", duration_s, labels={"operation": op})
-        
-        event = {
-            "event": "trace_span",
-            "service": self.service_name,
-            "trace_id": span.get("trace_id"),
-            "span_id": span.get("span_id"),
-            "operation": op,
-            "status": status,
-            "duration_ms": round(duration_s * 1000, 2),
-            "ts_utc": datetime.datetime.utcnow().isoformat() + "Z"
-        }
-        
-        merged_attrs = {}
-        merged_attrs.update(span.get("attributes", {}))
-        if attributes:
-            merged_attrs.update(attributes)
-        if merged_attrs:
-            event["attributes"] = merged_attrs
-        if error:
-            event["error"] = str(error)
-        
-        if status != "ok":
-            self.inc_counter("app_errors_total", 1, labels={"operation": op})
-            with self._lock:
-                self._recent_errors.append(time.time())
-                if len(self._recent_errors) > 1000:
-                    self._recent_errors = self._recent_errors[-1000:]
-        
-        logger.info("OBS_EVENT %s", json.dumps(event, ensure_ascii=False))
-    
-    @contextmanager
-    def trace(self, operation, attributes=None):
-        span = self.start_span(operation, attributes=attributes)
-        try:
-            yield span
-            self.end_span(span, status="ok")
-        except Exception as exc:
-            self.end_span(span, status="error", error=exc)
-            raise
-    
-    def health_payload(self):
-        uptime_s = max(0.0, time.time() - self.started_at)
-        now = time.time()
-        with self._lock:
-            recent_5m_errors = sum(1 for ts in self._recent_errors if now - ts <= 300)
-        
-        status = "ok"
-        if recent_5m_errors >= 10:
-            status = "degraded"
-        
-        return {
-            "status": status,
-            "service": self.service_name,
-            "uptime_seconds": round(uptime_s, 2),
-            "recent_errors_5m": recent_5m_errors,
-            "timestamp_utc": datetime.datetime.utcnow().isoformat() + "Z"
-        }
-    
-    def metrics_text(self):
-        lines = []
-        uptime = max(0.0, time.time() - self.started_at)
-        health = self.health_payload()
-        
-        self.set_gauge("app_uptime_seconds", uptime)
-        self.set_gauge("app_health_status", 1 if health["status"] == "ok" else 0)
-        self.set_gauge("app_recent_errors_5m", health["recent_errors_5m"])
-        
-        lines.append("# HELP app_operations_total Total number of instrumented operations.")
-        lines.append("# TYPE app_operations_total counter")
-        lines.append("# HELP app_errors_total Total number of failed operations.")
-        lines.append("# TYPE app_errors_total counter")
-        lines.append("# HELP app_operation_duration_seconds_sum Sum of operation durations.")
-        lines.append("# TYPE app_operation_duration_seconds_sum counter")
-        lines.append("# HELP app_operation_duration_seconds_count Count of operation durations.")
-        lines.append("# TYPE app_operation_duration_seconds_count counter")
-        lines.append("# HELP app_uptime_seconds Process uptime in seconds.")
-        lines.append("# TYPE app_uptime_seconds gauge")
-        lines.append("# HELP app_health_status 1=healthy, 0=degraded.")
-        lines.append("# TYPE app_health_status gauge")
-        lines.append("# HELP app_recent_errors_5m Number of recent errors (5m window).")
-        lines.append("# TYPE app_recent_errors_5m gauge")
-        
-        with self._lock:
-            counters = dict(self._counters)
-            gauges = dict(self._gauges)
-            sum_data = dict(self._summaries_sum)
-            count_data = dict(self._summaries_count)
-        
-        for (name, labels), value in counters.items():
-            lines.append(f"{name}{self._labels_to_text(labels)} {value}")
-        
-        for (name, labels), value in sum_data.items():
-            lines.append(f"{name}_sum{self._labels_to_text(labels)} {value}")
-        for (name, labels), value in count_data.items():
-            lines.append(f"{name}_count{self._labels_to_text(labels)} {value}")
-        
-        for (name, labels), value in gauges.items():
-            lines.append(f"{name}{self._labels_to_text(labels)} {value}")
-        
-        return "\n".join(lines) + "\n"
-    
-    def start_http_server(self, host="127.0.0.1", port=9108):
-        """Expose /healthz and /metrics endpoints in background thread."""
-        if self._http_server is not None:
-            return
-        
-        manager = self
-        
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                if self.path in ("/health", "/healthz"):
-                    payload = manager.health_payload()
-                    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                
-                if self.path == "/metrics":
-                    body = manager.metrics_text().encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                
-                self.send_response(404)
-                self.end_headers()
-            
-            def log_message(self, format, *args):
-                return
-        
-        self._http_server = ThreadingHTTPServer((host, int(port)), Handler)
-        self._http_thread = threading.Thread(target=self._http_server.serve_forever, daemon=True)
-        self._http_thread.start()
-        logger.info(f"Observability endpoint started at http://{host}:{port} (/healthz, /metrics)")
+# Slice C Wave 1: observability
+from app.monitoring.observability import ObservabilityManager, OBSERVABILITY
 
 # Multi-Agent System imports
 from system_health_monitor import SystemHealthMonitor, SklearnAutoencoder
@@ -955,677 +603,18 @@ class ThemeManager:
 
 
 
-def create_sequences(data, sequence_length):
-    """
-    Create sequences from time series data for LSTM
-    
-    Args:
-        data: numpy array of shape (n_samples, n_features)
-        sequence_length: int, length of each sequence
-        
-    Returns:
-        numpy array of shape (n_samples - sequence_length, sequence_length, n_features)
-    """
-    if len(data) < sequence_length:
-        raise ValueError(f"Data length {len(data)} is less than sequence length {sequence_length}")
-    
-    sequences = []
-    for i in range(len(data) - sequence_length):
-        sequences.append(data[i:i + sequence_length])
-    
-    return np.array(sequences)
-
-
-def create_sequences_3d(data, sequence_length):
-    """
-    Create 3D sequences from time series data for CNN
-    Adds channel dimension for Conv1D
-    
-    Args:
-        data: numpy array of shape (n_samples, n_features)
-        sequence_length: int, length of each sequence
-        
-    Returns:
-        numpy array of shape (n_samples - sequence_length, sequence_length, n_features, 1)
-    """
-    sequences = create_sequences(data, sequence_length)
-    # Add channel dimension for CNN
-    return np.expand_dims(sequences, axis=-1)
-
-
-
-
-class AutoencoderLSTMAgent:
-    """
-    Agent 1: Hybrid Autoencoder + LSTM for reconstruction error analysis
-    Uses reconstruction error to detect anomalies and LSTM for temporal patterns
-    """
-    
-    def __init__(self, input_dim, sequence_length=10, encoding_dim=8):
-        self.input_dim = input_dim
-        self.sequence_length = sequence_length
-        self.encoding_dim = encoding_dim
-        self.autoencoder = None
-        self.lstm_model = None
-        self.threshold = None
-        self.scaler = StandardScaler()
-        self.is_trained = False
-        
-        logger.info(f"Initialized AutoencoderLSTMAgent: input_dim={input_dim}, seq_len={sequence_length}")
-    
-    def build_autoencoder(self):
-        """Build the autoencoder model"""
-        if not TENSORFLOW_AVAILABLE:
-            raise RuntimeError("TensorFlow is required for AutoencoderLSTMAgent")
-        
-        # Encoder
-        encoder_input = Input(shape=(self.input_dim,), name='encoder_input')
-        encoded = Dense(64, activation='relu', name='encoder_1')(encoder_input)
-        encoded = Dense(32, activation='relu', name='encoder_2')(encoded)
-        encoded = Dense(self.encoding_dim, activation='relu', name='encoding')(encoded)
-        
-        # Decoder
-        decoded = Dense(32, activation='relu', name='decoder_1')(encoded)
-        decoded = Dense(64, activation='relu', name='decoder_2')(decoded)
-        decoder_output = Dense(self.input_dim, activation='linear', name='decoder_output')(decoded)
-        
-        # Autoencoder model
-        self.autoencoder = Model(encoder_input, decoder_output, name='autoencoder')
-        self.autoencoder.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
-        
-        logger.info("Autoencoder model built successfully")
-    
-    def build_lstm(self):
-        """Build the LSTM model for temporal patterns"""
-        if not TENSORFLOW_AVAILABLE:
-            raise RuntimeError("TensorFlow is required for AutoencoderLSTMAgent")
-        
-        lstm_input = Input(shape=(self.sequence_length, self.input_dim), name='lstm_input')
-        lstm_out = LSTM(64, return_sequences=True, name='lstm_1')(lstm_input)
-        lstm_out = LSTM(32, return_sequences=False, name='lstm_2')(lstm_out)
-        lstm_output = Dense(self.input_dim, activation='linear', name='lstm_output')(lstm_out)
-        
-        self.lstm_model = Model(lstm_input, lstm_output, name='lstm')
-        self.lstm_model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
-        
-        logger.info("LSTM model built successfully")
-    
-    def train(self, X, epochs=50, batch_size=32, validation_split=0.2):
-        """
-        Train both autoencoder and LSTM models
-        
-        Args:
-            X: Training data of shape (n_samples, n_features)
-            epochs: Number of training epochs
-            batch_size: Batch size for training
-            validation_split: Fraction of data to use for validation
-        """
-        try:
-            logger.info(f"Training AutoencoderLSTMAgent on {len(X)} samples...")
-            
-            # Scale the data
-            X_scaled = self.scaler.fit_transform(X)
-            
-            # Build and train autoencoder
-            self.build_autoencoder()
-            early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-            
-            self.autoencoder.fit(
-                X_scaled, X_scaled,
-                epochs=epochs,
-                batch_size=batch_size,
-                validation_split=validation_split,
-                callbacks=[early_stop],
-                verbose=0
-            )
-            
-            # Build and train LSTM if we have enough data
-            if len(X_scaled) >= self.sequence_length + 10:
-                self.build_lstm()
-                X_sequences = create_sequences(X_scaled, self.sequence_length)
-                y_targets = X_scaled[self.sequence_length:]
-                
-                self.lstm_model.fit(
-                    X_sequences, y_targets,
-                    epochs=epochs,
-                    batch_size=batch_size,
-                    validation_split=validation_split,
-                    callbacks=[early_stop],
-                    verbose=0
-                )
-            else:
-                logger.warning(f"Not enough data for LSTM training (need at least {self.sequence_length + 10} samples)")
-            
-            # Calculate threshold from reconstruction errors
-            reconstructed = self.autoencoder.predict(X_scaled, verbose=0)
-            reconstruction_errors = np.mean(np.square(X_scaled - reconstructed), axis=1)
-            self.threshold = np.percentile(reconstruction_errors, 95)
-            
-            self.is_trained = True
-            logger.info(f"AutoencoderLSTMAgent trained successfully. Threshold: {self.threshold:.4f}")
-            
-        except Exception as e:
-            logger.error(f"Error training AutoencoderLSTMAgent: {str(e)}")
-            raise
-    
-    def predict(self, X):
-        """
-        Predict anomalies using reconstruction error
-        
-        Args:
-            X: Data to predict on, shape (n_samples, n_features)
-            
-        Returns:
-            dict with reconstruction_error, anomaly_score, is_anomaly
-        """
-        if not self.is_trained:
-            raise RuntimeError("Model must be trained before prediction")
-        
-        try:
-            X_scaled = self.scaler.transform(X)
-            
-            # Get reconstruction error from autoencoder
-            reconstructed = self.autoencoder.predict(X_scaled, verbose=0)
-            reconstruction_error = np.mean(np.square(X_scaled - reconstructed), axis=1)
-            
-            # Calculate anomaly score (normalized by threshold)
-            anomaly_score = reconstruction_error / (self.threshold + 1e-10)
-            
-            # LSTM prediction (if available and enough data)
-            lstm_contribution = np.zeros_like(anomaly_score)
-            if self.lstm_model is not None and len(X_scaled) >= self.sequence_length:
-                try:
-                    X_sequences = create_sequences(X_scaled, self.sequence_length)
-                    lstm_pred = self.lstm_model.predict(X_sequences, verbose=0)
-                    lstm_error = np.mean(np.square(X_scaled[self.sequence_length:] - lstm_pred), axis=1)
-                    # Pad lstm_contribution to match length
-                    lstm_contribution = np.concatenate([
-                        np.zeros(self.sequence_length),
-                        lstm_error / (self.threshold + 1e-10)
-                    ])
-                except Exception as e:
-                    logger.warning(f"LSTM prediction failed: {str(e)}")
-            
-            # Combined score (autoencoder 70%, LSTM 30%)
-            combined_score = 0.7 * anomaly_score + 0.3 * lstm_contribution
-            
-            return {
-                'reconstruction_error': reconstruction_error,
-                'anomaly_score': combined_score,
-                'is_anomaly': combined_score > 1.0
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in AutoencoderLSTMAgent prediction: {str(e)}")
-            raise
-
-
-class CNNAgent:
-    """
-    Agent 2: 1D CNN for spatial-temporal pattern detection
-    Advanced model for detecting complex anomaly patterns
-    """
-    
-    def __init__(self, input_shape, sequence_length=10):
-        self.input_shape = input_shape  # (n_features,)
-        self.sequence_length = sequence_length
-        self.model = None
-        self.threshold = None
-        self.scaler = StandardScaler()
-        self.is_trained = False
-        
-        logger.info(f"Initialized CNNAgent: input_shape={input_shape}, seq_len={sequence_length}")
-    
-    def build_model(self):
-        """Build 1D CNN model"""
-        if not TENSORFLOW_AVAILABLE:
-            raise RuntimeError("TensorFlow is required for CNNAgent")
-        
-        # Input shape: (sequence_length, n_features)
-        cnn_input = Input(shape=(self.sequence_length, self.input_shape), name='cnn_input')
-        
-        # 1D Convolutional layers
-        conv1 = Conv1D(64, kernel_size=3, activation='relu', padding='same', name='conv1')(cnn_input)
-        pool1 = MaxPooling1D(pool_size=2, name='pool1')(conv1)
-        
-        conv2 = Conv1D(32, kernel_size=3, activation='relu', padding='same', name='conv2')(pool1)
-        pool2 = MaxPooling1D(pool_size=2, name='pool2')(conv2)
-        
-        # Flatten and dense layers
-        flatten = Flatten(name='flatten')(pool2)
-        dense1 = Dense(64, activation='relu', name='dense1')(flatten)
-        dropout = Dropout(0.3, name='dropout')(dense1)
-        dense2 = Dense(32, activation='relu', name='dense2')(dropout)
-        
-        # Output: anomaly score
-        output = Dense(1, activation='sigmoid', name='output')(dense2)
-        
-        self.model = Model(cnn_input, output, name='cnn_agent')
-        self.model.compile(optimizer=Adam(learning_rate=0.001), 
-                          loss='binary_crossentropy', 
-                          metrics=['accuracy'])
-        
-        logger.info("CNN model built successfully")
-    
-    def _generate_pseudo_labels(self, X):
-        """Generate pseudo-labels using IsolationForest"""
-        # Flatten sequences for IsolationForest
-        X_flat = X.reshape(X.shape[0], -1)
-        iso = IsolationForest(contamination=0.1, random_state=42)
-        labels = iso.fit_predict(X_flat)
-        return (labels == -1).astype(np.float32)  # Convert to 0/1
-    
-    def train(self, X, y=None, epochs=50, batch_size=32, validation_split=0.2):
-        """
-        Train CNN model
-        
-        Args:
-            X: Training data of shape (n_samples, n_features)
-            y: Optional labels (if None, will generate pseudo-labels)
-            epochs: Number of training epochs
-            batch_size: Batch size for training
-            validation_split: Fraction of data to use for validation
-        """
-        try:
-            logger.info(f"Training CNNAgent on {len(X)} samples...")
-            
-            # Scale the data
-            X_scaled = self.scaler.fit_transform(X)
-            
-            # Create sequences
-            if len(X_scaled) < self.sequence_length + 10:
-                raise ValueError(f"Need at least {self.sequence_length + 10} samples for CNN training")
-            
-            X_sequences = create_sequences(X_scaled, self.sequence_length)
-            
-            # Generate or use provided labels
-            if y is None:
-                logger.info("Generating pseudo-labels using IsolationForest...")
-                y = self._generate_pseudo_labels(X_sequences)
-            else:
-                y = y[self.sequence_length:]  # Align with sequences
-            
-            # Build and train model
-            self.build_model()
-            early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-            
-            self.model.fit(
-                X_sequences, y,
-                epochs=epochs,
-                batch_size=batch_size,
-                validation_split=validation_split,
-                callbacks=[early_stop],
-                verbose=0
-            )
-            
-            # Set threshold
-            predictions = self.model.predict(X_sequences, verbose=0).flatten()
-            self.threshold = np.percentile(predictions, 95)
-            
-            self.is_trained = True
-            logger.info(f"CNNAgent trained successfully. Threshold: {self.threshold:.4f}")
-            
-        except Exception as e:
-            logger.error(f"Error training CNNAgent: {str(e)}")
-            raise
-    
-    def predict(self, X):
-        """
-        Predict anomaly scores using CNN
-        
-        Args:
-            X: Data to predict on, shape (n_samples, n_features)
-            
-        Returns:
-            dict with anomaly_score and is_anomaly
-        """
-        if not self.is_trained:
-            raise RuntimeError("Model must be trained before prediction")
-        
-        try:
-            X_scaled = self.scaler.transform(X)
-            
-            # Create sequences
-            if len(X_scaled) < self.sequence_length:
-                # Not enough data, return zeros
-                return {
-                    'anomaly_score': np.zeros(len(X)),
-                    'is_anomaly': np.zeros(len(X), dtype=bool)
-                }
-            
-            X_sequences = create_sequences(X_scaled, self.sequence_length)
-            anomaly_scores_seq = self.model.predict(X_sequences, verbose=0).flatten()
-            
-            # Pad scores to match input length
-            anomaly_scores = np.concatenate([
-                np.zeros(self.sequence_length),
-                anomaly_scores_seq
-            ])
-            
-            return {
-                'anomaly_score': anomaly_scores,
-                'is_anomaly': anomaly_scores > self.threshold
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in CNNAgent prediction: {str(e)}")
-            raise
-
-
-class TrendAnalysisModel:
-    """
-    Trend Analysis using ARIMA/SARIMA for time series forecasting
-    Detects anomalies based on deviation from predicted trends
-    """
-    
-    def __init__(self, model_type='arima'):
-        self.model_type = model_type
-        self.model = None
-        self.history = []
-        self.is_trained = False
-        
-        logger.info(f"Initialized TrendAnalysisModel: model_type={model_type}")
-    
-    def fit(self, time_series_data, seasonal_period=None):
-        """
-        Fit trend model on historical data
-        
-        Args:
-            time_series_data: 1D array of time series values
-            seasonal_period: Period for seasonal ARIMA (optional)
-        """
-        try:
-            logger.info(f"Training {self.model_type.upper()} model on {len(time_series_data)} samples...")
-            
-            if not STATSMODELS_ARIMA_AVAILABLE:
-                logger.warning("statsmodels not available, using simple moving average")
-                self.model = 'simple_ma'
-                self.history = list(time_series_data)
-                self.is_trained = True
-                return
-            
-            if self.model_type == 'arima':
-                if PMDARIMA_AVAILABLE:
-                    # Auto-detect best parameters
-                    self.model = auto_arima(
-                        time_series_data,
-                        seasonal=False,
-                        stepwise=True,
-                        suppress_warnings=True,
-                        error_action='ignore',
-                        max_p=3, max_q=3, max_d=2
-                    )
-                else:
-                    # Use manual parameters
-                    self.model = ARIMA(time_series_data, order=(1, 1, 1))
-                    self.model = self.model.fit()
-                    
-            elif self.model_type == 'sarima' and seasonal_period:
-                self.model = SARIMAX(
-                    time_series_data,
-                    order=(1, 1, 1),
-                    seasonal_order=(1, 1, 1, seasonal_period)
-                )
-                self.model = self.model.fit(disp=False)
-            else:
-                # Fallback to simple ARIMA
-                self.model = ARIMA(time_series_data, order=(1, 1, 1))
-                self.model = self.model.fit()
-            
-            self.history = list(time_series_data)
-            self.is_trained = True
-            logger.info(f"{self.model_type.upper()} model trained successfully")
-            
-        except Exception as e:
-            logger.error(f"Error training TrendAnalysisModel: {str(e)}")
-            # Fallback to simple moving average
-            self.model = 'simple_ma'
-            self.history = list(time_series_data)
-            self.is_trained = True
-            logger.warning("Using simple moving average as fallback")
-    
-    def predict(self, steps_ahead=24):
-        """
-        Predict future values
-        
-        Args:
-            steps_ahead: Number of steps to forecast
-            
-        Returns:
-            numpy array of forecasted values
-        """
-        if not self.is_trained:
-            raise RuntimeError("Model must be trained before prediction")
-        
-        try:
-            if self.model == 'simple_ma':
-                # Simple moving average forecast
-                window = min(10, len(self.history))
-                forecast_value = np.mean(self.history[-window:])
-                return np.full(steps_ahead, forecast_value)
-            else:
-                # ARIMA/SARIMA forecast
-                forecast = self.model.forecast(steps=steps_ahead)
-                return np.array(forecast)
-                
-        except Exception as e:
-            logger.error(f"Error in TrendAnalysisModel prediction: {str(e)}")
-            # Fallback: return last value
-            return np.full(steps_ahead, self.history[-1])
-    
-    def detect_trend_anomalies(self, current_value, predicted_value, confidence_level=0.1):
-        """
-        Detect if current value deviates from predicted trend
-        
-        Args:
-            current_value: Current observed value
-            predicted_value: Predicted value from model
-            confidence_level: Acceptable deviation (as fraction)
-            
-        Returns:
-            tuple: (is_anomaly: bool, deviation: float)
-        """
-        if predicted_value == 0:
-            predicted_value = 1e-10  # Avoid division by zero
-        
-        deviation = abs(current_value - predicted_value) / abs(predicted_value)
-        is_anomaly = deviation > confidence_level
-        
-        return is_anomaly, deviation
-
-
-class MultiAgentFusionSystem:
-    """
-    Multi-Agent Fusion System combining:
-    - Agent 1: Autoencoder + LSTM (reconstruction error)
-    - Agent 2: CNN (spatial-temporal patterns)
-    - Trend Model: ARIMA (trend prediction)
-    """
-    
-    def __init__(self, input_dim, sequence_length=10):
-        self.input_dim = input_dim
-        self.sequence_length = sequence_length
-        
-        # Initialize agents
-        self.agent1 = None  # Will be created if TensorFlow available
-        self.agent2 = None  # Will be created if TensorFlow available
-        self.trend_model = TrendAnalysisModel(model_type='arima')
-        
-        # Fusion weights (can be adjusted)
-        self.weights = {
-            'agent1': 0.4,  # Autoencoder+LSTM weight
-            'agent2': 0.4,  # CNN weight
-            'trend': 0.2    # Trend model weight
-        }
-        
-        self.is_trained = False
-        
-        logger.info(f"Initialized MultiAgentFusionSystem with weights: {self.weights}")
-    
-    def train(self, X, epochs=50, batch_size=32):
-        """
-        Train all three components
-        
-        Args:
-            X: Training data of shape (n_samples, n_features)
-            epochs: Number of training epochs for deep learning models
-            batch_size: Batch size for training
-        """
-        try:
-            logger.info("Starting training for MultiAgentFusionSystem")
-            
-            # Train Agent 1 (Autoencoder + LSTM)
-            if TENSORFLOW_AVAILABLE:
-                logger.info("[1/3] Training Agent 1 (Autoencoder+LSTM)...")
-                self.agent1 = AutoencoderLSTMAgent(self.input_dim, self.sequence_length)
-                self.agent1.train(X, epochs=epochs, batch_size=batch_size)
-                logger.info("[OK] Agent 1 trained successfully")
-            else:
-                logger.warning("[SKIP] Agent 1 skipped (TensorFlow not available)")
-            
-            # Train Agent 2 (CNN)
-            if TENSORFLOW_AVAILABLE and len(X) >= self.sequence_length + 10:
-                logger.info("[2/3] Training Agent 2 (CNN)...")
-                self.agent2 = CNNAgent(self.input_dim, self.sequence_length)
-                self.agent2.train(X, epochs=epochs, batch_size=batch_size)
-                logger.info("[OK] Agent 2 trained successfully")
-            else:
-                if not TENSORFLOW_AVAILABLE:
-                    logger.warning("[SKIP] Agent 2 skipped (TensorFlow not available)")
-                else:
-                    logger.warning(f"[SKIP] Agent 2 skipped (need at least {self.sequence_length + 10} samples)")
-            
-            # Train Trend Model
-            logger.info("[3/3] Training Trend Model (ARIMA)...")
-            # Use mean of features for univariate trend analysis
-            time_series = np.mean(X, axis=1) if X.ndim > 1 else X
-            self.trend_model.fit(time_series)
-            logger.info("[OK] Trend Model trained successfully")
-            
-            self.is_trained = True
-            logger.info("MultiAgentFusionSystem training complete")
-            
-        except Exception as e:
-            logger.error(f"Error training MultiAgentFusionSystem: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise
-    
-    def predict(self, X, return_details=False):
-        """
-        Get ensemble prediction from all agents
-        
-        Args:
-            X: Data to predict on, shape (n_samples, n_features)
-            return_details: If True, return detailed results from each agent
-            
-        Returns:
-            If return_details=False: (is_anomaly: bool, final_score: float)
-            If return_details=True: dict with detailed results
-        """
-        if not self.is_trained:
-            raise RuntimeError("System must be trained before prediction")
-        
-        try:
-            results = {}
-            scores = []
-            weights_used = []
-            
-            # Agent 1 prediction
-            if self.agent1 is not None:
-                agent1_result = self.agent1.predict(X)
-                results['agent1'] = agent1_result
-                scores.append(np.mean(agent1_result['anomaly_score']))
-                weights_used.append(self.weights['agent1'])
-            else:
-                results['agent1'] = {'anomaly_score': np.zeros(len(X)), 'is_anomaly': np.zeros(len(X), dtype=bool), 'reconstruction_error': np.zeros(len(X))}
-                scores.append(0)
-                weights_used.append(0)
-            
-            # Agent 2 prediction
-            if self.agent2 is not None:
-                agent2_result = self.agent2.predict(X)
-                results['agent2'] = agent2_result
-                scores.append(np.mean(agent2_result['anomaly_score']))
-                weights_used.append(self.weights['agent2'])
-            else:
-                results['agent2'] = {'anomaly_score': np.zeros(len(X)), 'is_anomaly': np.zeros(len(X), dtype=bool)}
-                scores.append(0)
-                weights_used.append(0)
-            
-            # Trend prediction
-            current_mean = np.mean(X, axis=1) if X.ndim > 1 else X
-            trend_forecast = self.trend_model.predict(steps_ahead=5)
-            trend_anomaly, trend_deviation = self.trend_model.detect_trend_anomalies(
-                current_mean[-1], 
-                trend_forecast[0],
-                confidence_level=0.15
-            )
-            
-            results['trend'] = {
-                'forecast': trend_forecast,
-                'is_anomaly': trend_anomaly,
-                'deviation': trend_deviation,
-                'current_value': current_mean[-1]
-            }
-            scores.append(trend_deviation if trend_anomaly else 0)
-            weights_used.append(self.weights['trend'])
-            
-            # Normalize weights if some agents are missing
-            total_weight = sum(weights_used)
-            if total_weight > 0:
-                weights_used = [w / total_weight for w in weights_used]
-            
-            # Fusion: Weighted combination
-            final_score = sum(s * w for s, w in zip(scores, weights_used))
-            
-            # Final decision (threshold can be adjusted)
-            is_anomaly = final_score > 0.6
-            
-            results['final_score'] = final_score
-            results['is_anomaly'] = is_anomaly
-            results['weights_used'] = dict(zip(['agent1', 'agent2', 'trend'], weights_used))
-            
-            if return_details:
-                return results
-            else:
-                return is_anomaly, final_score
-                
-        except Exception as e:
-            logger.error(f"Error in MultiAgentFusionSystem prediction: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise
-    
-    def update_weights(self, agent1_weight=None, agent2_weight=None, trend_weight=None):
-        """Update fusion weights"""
-        if agent1_weight is not None:
-            self.weights['agent1'] = agent1_weight
-        if agent2_weight is not None:
-            self.weights['agent2'] = agent2_weight
-        if trend_weight is not None:
-            self.weights['trend'] = trend_weight
-        
-        # Normalize weights
-        total = sum(self.weights.values())
-        self.weights = {k: v / total for k, v in self.weights.items()}
-        
-        logger.info(f"Updated fusion weights: {self.weights}")
-
-# Constants
-ENCRYPTION_KEY_FILE = "keys/encryption_key.bin"
-USER_DB_FILE = "data/users.json"
-CONFIG_FILE = "config/app_config.json"
-AUTH_CONFIG_FILE = "config/auth_config.json"
-MODELS_DIR = "models/"
-DATA_DIR = "data/"
-REPORTS_DIR = "reports/"
-TELEMETRY_DB_FILE = "data/telemetry.db"
-RULE_CONFIG_FILE = "config/rule_config.json"
-ALERT_ROUTING_CONFIG_FILE = "config/alert_routing_config.json"
-
-# Add new constants after existing constants
-ACTIVITY_LOG_FILE = "logs/activity.log"
-AUDIT_LOG_FILE = "logs/audit_activity.log"
-AUTO_REPORTS_DIR = "reports/auto"
+# Slice C Wave 1: multi-agent models
+from app.models.multi_agent import (
+    AutoencoderLSTMAgent,
+    CNNAgent,
+    MultiAgentFusionSystem,
+    PMDARIMA_AVAILABLE,
+    PSUTIL_AVAILABLE,
+    STATSMODELS_ARIMA_AVAILABLE,
+    TrendAnalysisModel,
+    create_sequences,
+    create_sequences_3d,
+)
 
 _PLACEHOLDER_EMAIL_DOMAINS = frozenset({"example.com", "example.org", "example.net"})
 
@@ -1690,33 +679,20 @@ TIMESTAMP_COLUMN_NAMES = frozenset({
 _FERNET_PREFIX = b"F1:"
 
 
-class SecurityError(Exception):
-    """Raised when a security policy blocks an operation."""
+# Slice C Wave 1: trusted pickle helpers
+from app.security.pickle_safe import (
+    SecurityError,
+    configure_trusted_pickle_roots,
+    safe_pickle_load,
+)
+
+configure_trusted_pickle_roots(DATA_DIR, MODELS_DIR, REPORTS_DIR)
 
 
 def _trusted_pickle_roots():
-    roots = []
-    for path in (DATA_DIR, MODELS_DIR, REPORTS_DIR, os.getcwd()):
-        try:
-            roots.append(os.path.realpath(path))
-        except OSError:
-            continue
-    return roots
+    from app.security.pickle_safe import trusted_pickle_roots
 
-
-def safe_pickle_load(filepath):
-    """Load pickle only from trusted application directories."""
-    real_path = os.path.realpath(filepath)
-    trusted = any(
-        real_path == root or real_path.startswith(root + os.sep)
-        for root in _trusted_pickle_roots()
-    )
-    if not trusted:
-        raise SecurityError(
-            f"Refusing to load pickle outside trusted directories: {filepath}"
-        )
-    with open(real_path, "rb") as f:
-        return pickle.load(f)
+    return trusted_pickle_roots()
 
 
 def _detect_timestamp_column(columns):
@@ -1762,7 +738,6 @@ def _file_telemetry_sort_key(filepath):
     return os.path.getmtime(filepath)
 
 # Initialize observability manager (global singleton for MVP instrumentation)
-OBSERVABILITY = ObservabilityManager(service_name="telemetry_system")
 if OBSERVABILITY_ENABLED:
     try:
         OBSERVABILITY.start_http_server(host=OBSERVABILITY_HOST, port=OBSERVABILITY_PORT)
@@ -2252,398 +1227,57 @@ if AppServiceLayer is None or ServiceLayerContext is None:
 
 
 class BaseAuthProvider:
-    """Pluggable auth provider interface."""
+    """Pluggable auth provider interface — prefer app.auth.providers when available."""
     provider_name = "base"
-    
+
     def authenticate(self, username, password, user_manager):
         raise NotImplementedError
 
 
-class LocalAuthProvider(BaseAuthProvider):
-    provider_name = "local"
-    
-    def authenticate(self, username, password, user_manager):
-        return user_manager._authenticate_local(username, password)
+# Canonical providers live in app.auth.providers; keep names for UserManager wiring.
+if ModularLocalAuthProvider is not None:
+    LocalAuthProvider = ModularLocalAuthProvider
+else:
+    class LocalAuthProvider(BaseAuthProvider):
+        provider_name = "local"
 
+        def authenticate(self, username, password, user_manager):
+            return user_manager._authenticate_local(username, password)
 
-class OIDCAuthProvider(BaseAuthProvider):
-    provider_name = "oidc"
-    
-    def _map_role(self, raw_roles, mapping, default_role="viewer"):
-        if raw_roles is None:
+if ModularOIDCAuthProvider is not None:
+    OIDCAuthProvider = ModularOIDCAuthProvider
+else:
+    class OIDCAuthProvider(BaseAuthProvider):
+        provider_name = "oidc"
+
+        def _map_role(self, raw_roles, mapping, default_role="viewer"):
+            if raw_roles is None:
+                return default_role
+            if isinstance(raw_roles, str):
+                raw_roles = [raw_roles]
+            for role in raw_roles:
+                mapped = mapping.get(str(role).lower())
+                if mapped:
+                    return mapped
             return default_role
-        if isinstance(raw_roles, str):
-            raw_roles = [raw_roles]
-        for role in raw_roles:
-            mapped = mapping.get(str(role).lower())
-            if mapped:
-                return mapped
-        return default_role
-    
-    def authenticate(self, username, password, user_manager):
-        cfg = (user_manager.auth_config or {}).get("oidc", {})
-        if not cfg.get("enabled"):
-            return False, None, "OIDC provider is disabled.", False, {"auth_provider": "oidc"}
-        
-        token_endpoint = str(cfg.get("token_endpoint", "")).strip()
-        userinfo_endpoint = str(cfg.get("userinfo_endpoint", "")).strip()
-        client_id = str(cfg.get("client_id", "")).strip()
-        client_secret = str(cfg.get("client_secret", "")).strip()
-        
-        if not token_endpoint or not userinfo_endpoint or not client_id:
-            return False, None, "OIDC is not fully configured.", False, {"auth_provider": "oidc"}
-        
-        post_data = {
-            "grant_type": "password",
-            "username": username,
-            "password": password,
-            "client_id": client_id,
-            "scope": str(cfg.get("scope", "openid profile email"))
-        }
-        if client_secret:
-            post_data["client_secret"] = client_secret
-        
-        encoded = urllib.parse.urlencode(post_data).encode("utf-8")
-        req = urllib_request.Request(
-            token_endpoint,
-            data=encoded,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST"
-        )
-        
-        try:
-            with urllib_request.urlopen(req, timeout=15) as resp:
-                token_payload = json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            logger.error(f"OIDC token request failed: {e}")
-            return False, None, "OIDC authentication failed.", False, {"auth_provider": "oidc"}
-        
-        access_token = token_payload.get("access_token")
-        if not access_token:
-            return False, None, "OIDC access token missing in response.", False, {"auth_provider": "oidc"}
-        
-        userinfo_req = urllib_request.Request(
-            userinfo_endpoint,
-            headers={"Authorization": f"Bearer {access_token}"},
-            method="GET"
-        )
-        try:
-            with urllib_request.urlopen(userinfo_req, timeout=15) as resp:
-                userinfo = json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            logger.error(f"OIDC userinfo request failed: {e}")
-            return False, None, "OIDC user info retrieval failed.", False, {"auth_provider": "oidc"}
-        
-        username_claim = str(cfg.get("username_claim", "preferred_username"))
-        email_claim = str(cfg.get("email_claim", "email"))
-        role_claim = str(cfg.get("role_claim", "roles"))
-        role_mapping = cfg.get("role_mapping", {}) or {}
-        
-        resolved_username = str(userinfo.get(username_claim) or username).strip()
-        resolved_email = str(userinfo.get(email_claim) or "").strip()
-        raw_roles = userinfo.get(role_claim)
-        resolved_role = self._map_role(raw_roles, role_mapping, cfg.get("default_role", "viewer"))
-        
-        user_manager.ensure_identity_record(
-            username=resolved_username,
-            role=resolved_role,
-            email=resolved_email,
-            auth_provider="oidc"
-        )
-        
-        details = {
-            "auth_provider": "oidc",
-            "resolved_username": resolved_username,
-            "email": resolved_email,
-            "oidc_subject": userinfo.get("sub"),
-            "raw_roles": raw_roles
-        }
-        return True, resolved_role, "OIDC login successful.", False, details
+
+        def authenticate(self, username, password, user_manager):
+            cfg = (user_manager.auth_config or {}).get("oidc", {})
+            if not cfg.get("enabled"):
+                return False, None, "OIDC provider is disabled.", False, {"auth_provider": "oidc"}
+            return False, None, "OIDC provider module unavailable.", False, {"auth_provider": "oidc"}
 
 
-class AlertPolicyManager:
-    """Dedup, cooldown, routing, escalation, and lifecycle persistence for alerts."""
-    def __init__(self, db_path, config_loader, dispatchers=None):
-        self.db_path = db_path
-        self.config_loader = config_loader
-        self.dispatchers = dispatchers or {}
-        self.config = self.config_loader()
-    
-    def reload_config(self):
-        self.config = self.config_loader()
-        return self.config
-    
-    def _db(self):
-        return sqlite3.connect(self.db_path)
-    
-    def _severity_rank(self, severity):
-        mapping = {"info": 1, "warning": 2, "critical": 3}
-        return mapping.get(str(severity).lower(), 1)
-    
-    def _fingerprint(self, severity, message, payload):
-        model_name = str((payload or {}).get("model_name", "unknown"))
-        raw = f"{str(severity).lower()}|{model_name}|{str(message).strip()}"
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    
-    def _log_event(self, conn, incident_id, event_type, severity, channel=None, status="ok", details=None):
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO alert_lifecycle_events
-            (incident_id, event_time, event_type, severity, channel, status, details)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(incident_id),
-                datetime.datetime.utcnow().isoformat(),
-                str(event_type),
-                str(severity),
-                channel,
-                str(status),
-                json.dumps(details or {}, ensure_ascii=False)
-            )
-        )
-    
-    def _should_route_with_cooldown(self, conn, incident_id, cooldown_seconds):
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT event_time FROM alert_lifecycle_events
-            WHERE incident_id = ? AND event_type IN ('triggered', 'escalated')
-            ORDER BY id DESC LIMIT 1
-            """,
-            (int(incident_id),)
-        )
-        row = cursor.fetchone()
-        if not row:
-            return True
-        try:
-            last_ts = datetime.datetime.fromisoformat(row[0])
-            return (datetime.datetime.utcnow() - last_ts).total_seconds() >= float(cooldown_seconds)
-        except Exception:
-            return True
-    
-    def process_alert(self, severity, message, payload=None):
-        """Process an alert and return normalized incident context."""
-        self.reload_config()
-        payload = to_json_compatible((payload or {}).copy())
-        severity = str(severity).lower()
-        fingerprint = self._fingerprint(severity, message, payload)
-        dedup_window = int(self.config.get("dedup_window_seconds", 300))
-        cooldown_seconds = int(self.config.get("cooldown_seconds", 60))
-        now_iso = datetime.datetime.utcnow().isoformat()
-        next_escalation_at = (
-            datetime.datetime.utcnow() + datetime.timedelta(minutes=int(self.config.get("escalation_unacked_minutes", 15)))
-        ).isoformat()
-        
-        with self._db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT id, status, severity, message, first_seen, last_seen, occurrence_count, escalated
-                FROM alert_incidents
-                WHERE fingerprint = ? AND status IN ('open', 'escalated')
-                ORDER BY id DESC LIMIT 1
-                """,
-                (fingerprint,)
-            )
-            row = cursor.fetchone()
-            incident_id = None
-            action = "created"
-            
-            if row:
-                incident_id = int(row[0])
-                last_seen = row[5]
-                within_dedup = False
-                try:
-                    within_dedup = (datetime.datetime.utcnow() - datetime.datetime.fromisoformat(last_seen)).total_seconds() <= dedup_window
-                except Exception:
-                    within_dedup = True
-                
-                if within_dedup:
-                    action = "deduplicated"
-                    cursor.execute(
-                        """
-                        UPDATE alert_incidents
-                        SET last_seen = ?, occurrence_count = occurrence_count + 1, last_payload = ?
-                        WHERE id = ?
-                        """,
-                        (now_iso, json.dumps(payload, ensure_ascii=False), incident_id)
-                    )
-                    self._log_event(conn, incident_id, "deduplicated", severity, status="ok", details={"message": message})
-                else:
-                    cursor.execute(
-                        """
-                        UPDATE alert_incidents
-                        SET status = 'open', severity = ?, message = ?, last_seen = ?, occurrence_count = occurrence_count + 1,
-                            next_escalation_at = ?, last_payload = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            severity,
-                            str(message),
-                            now_iso,
-                            next_escalation_at,
-                            json.dumps(payload, ensure_ascii=False),
-                            incident_id
-                        )
-                    )
-                    self._log_event(conn, incident_id, "reopened", severity, status="ok", details={"message": message})
-            else:
-                cursor.execute(
-                    """
-                    INSERT INTO alert_incidents
-                    (fingerprint, status, severity, message, model_name, first_seen, last_seen,
-                     occurrence_count, acknowledged_by, acknowledged_at, escalated, next_escalation_at, last_payload)
-                    VALUES (?, 'open', ?, ?, ?, ?, ?, 1, NULL, NULL, 0, ?, ?)
-                    """,
-                    (
-                        fingerprint,
-                        severity,
-                        str(message),
-                        str(payload.get("model_name", "Unknown")),
-                        now_iso,
-                        now_iso,
-                        next_escalation_at,
-                        json.dumps(payload, ensure_ascii=False)
-                    )
-                )
-                incident_id = int(cursor.lastrowid)
-                self._log_event(conn, incident_id, "created", severity, status="ok", details={"message": message})
-            
-            should_route = self._should_route_with_cooldown(conn, incident_id, cooldown_seconds)
-            if not should_route:
-                self._log_event(
-                    conn,
-                    incident_id,
-                    "suppressed_cooldown",
-                    severity,
-                    status="suppressed",
-                    details={"cooldown_seconds": cooldown_seconds}
-                )
-                conn.commit()
-                return {"incident_id": incident_id, "action": action, "routed": False}
-            
-            routes = list(self.config.get("routes", {}).get(severity, []))
-            for route in routes:
-                route_status = self._dispatch_route(route, incident_id, severity, message, payload, escalated=False)
-                self._log_event(conn, incident_id, "triggered", severity, channel=route, status=route_status["status"], details=route_status)
-            
-            conn.commit()
-            return {"incident_id": incident_id, "action": action, "routed": True, "routes": routes}
-    
-    def acknowledge(self, incident_id, acknowledged_by):
-        with self._db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE alert_incidents
-                SET status = 'acknowledged', acknowledged_by = ?, acknowledged_at = ?
-                WHERE id = ? AND status IN ('open', 'escalated')
-                """,
-                (str(acknowledged_by), datetime.datetime.utcnow().isoformat(), int(incident_id))
-            )
-            changed = cursor.rowcount > 0
-            if changed:
-                self._log_event(
-                    conn,
-                    incident_id,
-                    "acknowledged",
-                    "info",
-                    status="ok",
-                    details={"acknowledged_by": acknowledged_by}
-                )
-            conn.commit()
-            return changed
-    
-    def run_escalation_cycle(self):
-        """Escalate unacknowledged incidents that crossed escalation timeout."""
-        self.reload_config()
-        now = datetime.datetime.utcnow()
-        escalated_ids = []
-        with self._db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT id, severity, message, model_name, next_escalation_at, last_payload
-                FROM alert_incidents
-                WHERE status IN ('open', 'escalated')
-                  AND acknowledged_at IS NULL
-                """
-            )
-            rows = cursor.fetchall()
-            
-            for row in rows:
-                incident_id = int(row[0])
-                severity = str(row[1]).lower()
-                message = str(row[2])
-                next_escalation_at = row[4]
-                try:
-                    if not next_escalation_at or datetime.datetime.fromisoformat(next_escalation_at) > now:
-                        continue
-                except Exception:
-                    pass
-                
-                payload = {}
-                try:
-                    payload = json.loads(row[5]) if row[5] else {}
-                except Exception:
-                    payload = {"model_name": row[3]}
-                
-                routes = list(self.config.get("routes", {}).get(severity, []))
-                for route in routes:
-                    route_status = self._dispatch_route(
-                        route,
-                        incident_id,
-                        severity,
-                        f"[ESCALATED] {message}",
-                        payload,
-                        escalated=True
-                    )
-                    self._log_event(conn, incident_id, "escalated", severity, channel=route, status=route_status["status"], details=route_status)
-                
-                next_time = (now + datetime.timedelta(minutes=int(self.config.get("escalation_unacked_minutes", 15)))).isoformat()
-                cursor.execute(
-                    """
-                    UPDATE alert_incidents
-                    SET status = 'escalated', escalated = 1, last_seen = ?, next_escalation_at = ?
-                    WHERE id = ?
-                    """,
-                    (now.isoformat(), next_time, incident_id)
-                )
-                escalated_ids.append(incident_id)
-            
-            conn.commit()
-        
-        return escalated_ids
-    
-    def _dispatch_route(self, route, incident_id, severity, message, payload, escalated=False):
-        route = str(route).lower()
-        channel_cfg = (self.config.get("channels", {}).get(route, {}) or {})
-        if not channel_cfg.get("enabled", False):
-            return {"status": "skipped", "reason": "disabled"}
-        
-        dispatcher = self.dispatchers.get(route)
-        if not dispatcher:
-            return {"status": "error", "reason": "missing_dispatcher"}
-        
-        try:
-            dispatcher(
-                incident_id=incident_id,
-                severity=severity,
-                message=message,
-                payload=payload,
-                channel_config=channel_cfg,
-                escalated=escalated
-            )
-            return {"status": "ok", "escalated": bool(escalated)}
-        except Exception as e:
-            return {"status": "error", "error": str(e), "escalated": bool(escalated)}
+# Slice C Wave 1: alerts — single source app.alerts.policy
+from app.alerts.policy import AlertPolicyManager
 
 # Maximum number of worker processes to use for data processing
 MAX_WORKERS = max(1, multiprocessing.cpu_count() - 1)
 
 # User management system
+# Canonical auth matrix/providers live in app.auth; this class remains the monolith
+# shell used by run.bat (bootstrap, GUI lockout, email hooks). ToolHost login uses
+# this instance via LocalAuthProvider → _authenticate_local.
 class UserManager:
     ROLES = {
         "admin": ["view_data", "import_data", "process_data", "manage_users", "configure_system", "train_models"],
@@ -2667,8 +1301,8 @@ class UserManager:
     
     def __init__(self):
         self.auth_config = load_auth_config()
-        local_provider_cls = ModularLocalAuthProvider or LocalAuthProvider
-        oidc_provider_cls = ModularOIDCAuthProvider or OIDCAuthProvider
+        local_provider_cls = LocalAuthProvider
+        oidc_provider_cls = OIDCAuthProvider
         self.auth_providers = {
             "local": local_provider_cls(),
             "oidc": oidc_provider_cls()
@@ -2720,7 +1354,7 @@ class UserManager:
             bootstrap_file = os.path.join(DATA_DIR, "bootstrap_admin_password.txt")
             with open(bootstrap_file, "w", encoding="utf-8") as f:
                 f.write(
-                    "Satellite Telemetry Monitoring Tool - Initial Admin Credentials\n"
+                    "SDA v4.0 - Initial Admin Credentials\n"
                     "------------------------------------------------------------\n"
                     f"Reason: {reason}\n"
                     "Username: admin\n"
@@ -2802,10 +1436,15 @@ class UserManager:
                 self.users = json.loads(decrypted_data)
                 if not isinstance(self.users, dict):
                     raise ValueError("User database format is invalid")
-                self._ensure_user_defaults()
             except Exception as e:
                 logger.error(f"Failed to load users: {e}")
                 self._create_bootstrap_admin(reason="recovery from user database load failure")
+                return
+            try:
+                self._ensure_user_defaults()
+            except Exception as e:
+                # Defaults must never wipe a successfully decrypted user DB.
+                logger.error(f"Failed to normalize user defaults (users kept): {e}")
         else:
             # Create secure bootstrap admin user
             self._create_bootstrap_admin(reason="first run")
@@ -3070,2747 +1709,20 @@ class UserManager:
         return allowed
 
 # Data handling classes
-class DataProcessor:
-    def __init__(self):
-        self.data = None
-        self.preprocessed_data = None
-        self.feature_columns = []
-        self.timestamp_column = None
-        
-    def load_csv(self, filepath):
-        """Load data from CSV file"""
-        load_span = OBSERVABILITY.start_span("data.load_csv", {"filepath": os.path.basename(str(filepath))}) if OBSERVABILITY else None
-        load_message = "Data loaded successfully"
-        try:
-            if ModularDataReader is not None:
-                success, message, result = ModularDataReader.load_csv(filepath)
-                if not success or result is None:
-                    raise ValueError(message)
-                self.data = result.dataframe
-                self.original_columns = result.original_columns
-                self.timestamp_column = result.timestamp_column or self.timestamp_column
-                load_message = message
-            else:
-                self.data = pd.read_csv(filepath)
-                self.original_columns = self.data.columns.tolist()
-                ts_col = _detect_timestamp_column(self.original_columns)
-                if ts_col:
-                    self.timestamp_column = ts_col
-                elif len(self.data.columns) >= 2:
-                    first_col = self.original_columns[0]
-                    sample = self.data[first_col].head(min(20, len(self.data)))
-                    parsed = pd.to_datetime(sample, errors="coerce")
-                    if parsed.notna().mean() >= 0.8:
-                        self.timestamp_column = first_col
-            if OBSERVABILITY:
-                row_count = int(len(self.data)) if self.data is not None else 0
-                col_count = int(len(self.data.columns)) if self.data is not None else 0
-                OBSERVABILITY.inc_counter("data_ingest_total", labels={"source": "csv", "status": "success"})
-                OBSERVABILITY.observe("data_ingest_rows", row_count, labels={"source": "csv"})
-                OBSERVABILITY.end_span(load_span, status="ok", attributes={"rows": row_count, "columns": col_count})
-            return True, load_message
-        except Exception as e:
-            if OBSERVABILITY:
-                OBSERVABILITY.inc_counter("data_ingest_total", labels={"source": "csv", "status": "error"})
-                OBSERVABILITY.end_span(load_span, status="error", error=e)
-            return False, f"Error loading data: {str(e)}"
-    
-    def load_json(self, filepath):
-        """Load data from JSON file"""
-        load_span = OBSERVABILITY.start_span("data.load_json", {"filepath": os.path.basename(str(filepath))}) if OBSERVABILITY else None
-        try:
-            if ModularDataReader is not None:
-                success, message, result = ModularDataReader.load_json(filepath)
-                if not success or result is None:
-                    raise ValueError(message)
-                self.data = result.dataframe
-                self.original_columns = result.original_columns
-                self.timestamp_column = result.timestamp_column or self.timestamp_column
-            else:
-                self.data = pd.read_json(filepath)
-                # Rename columns to standard format ['time', 'value']
-                if len(self.data.columns) >= 2:
-                    original_columns = self.data.columns.tolist()
-                    # Store original column names for reference
-                    self.original_columns = original_columns
-                    # Create a mapping from original to new column names
-                    rename_map = {original_columns[0]: 'time', original_columns[1]: 'value'}
-                    # If there are more columns, name them value2, value3, etc.
-                    for i, col in enumerate(original_columns[2:], start=2):
-                        rename_map[col] = f'value{i}'
-                    # Rename the columns
-                    self.data = self.data.rename(columns=rename_map)
-                    # Set timestamp column
-                    self.timestamp_column = 'time'
-            if OBSERVABILITY:
-                row_count = int(len(self.data)) if self.data is not None else 0
-                col_count = int(len(self.data.columns)) if self.data is not None else 0
-                OBSERVABILITY.inc_counter("data_ingest_total", labels={"source": "json", "status": "success"})
-                OBSERVABILITY.observe("data_ingest_rows", row_count, labels={"source": "json"})
-                OBSERVABILITY.end_span(load_span, status="ok", attributes={"rows": row_count, "columns": col_count})
-            return True, "Data loaded successfully and column names standardized to ['time', 'value']"
-        except Exception as e:
-            if OBSERVABILITY:
-                OBSERVABILITY.inc_counter("data_ingest_total", labels={"source": "json", "status": "error"})
-                OBSERVABILITY.end_span(load_span, status="error", error=e)
-            return False, f"Error loading data: {str(e)}"
-    
-    def preprocess_data(self, timestamp_col=None, feature_cols=None, 
-                       normalize=False, remove_outliers=False):
-        """Preprocess the loaded data"""
-        try:
-            if self.data is None:
-                return False, "No data loaded"
-            
-            df = self.data.copy()
-            
-            # Handle timestamp
-            if timestamp_col is not None and timestamp_col in df.columns:
-                self.timestamp_column = timestamp_col
-                if pd.api.types.is_string_dtype(df[timestamp_col]):
-                    df[timestamp_col] = pd.to_datetime(df[timestamp_col])
-                df.sort_values(by=timestamp_col, inplace=True)
-            
-            # Select features - explicitly exclude the timestamp column from features
-            if feature_cols is not None and len(feature_cols) > 0:
-                # Make sure we're not including the timestamp in feature columns
-                if timestamp_col in feature_cols:
-                    feature_cols = [col for col in feature_cols if col != timestamp_col]
-                
-                self.feature_columns = feature_cols
-                features_df = df[feature_cols]
-            else:
-                # Auto-select numeric columns
-                numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-                if timestamp_col in numeric_cols:
-                    numeric_cols.remove(timestamp_col)
-                self.feature_columns = numeric_cols
-                features_df = df[numeric_cols]
-            
-            # Handle missing values
-            features_df.fillna(features_df.mean(), inplace=True)
-            
-            # Normalize if requested
-            if normalize:
-                scaler = StandardScaler()
-                features_df = pd.DataFrame(
-                    scaler.fit_transform(features_df),
-                    columns=features_df.columns
-                )
-            
-            # Remove outliers if requested
-            if remove_outliers:
-                z_scores = np.abs((features_df - features_df.mean()) / features_df.std())
-                filtered_entries = (z_scores < 3).all(axis=1)
-                features_df = features_df[filtered_entries]
-                if timestamp_col is not None:
-                    df = df[filtered_entries]
-            
-            # Make sure we're only selecting valid numeric columns for preprocessing
-            numeric_features = features_df.select_dtypes(include=['number']).columns.tolist()
-            if len(numeric_features) != len(features_df.columns):
-                non_numeric = [col for col in features_df.columns if col not in numeric_features]
-                logger.warning(f"Non-numeric columns excluded from features: {non_numeric}")
-                features_df = features_df[numeric_features]
-                self.feature_columns = numeric_features
-            
-            # Prepare final preprocessed dataframe
-            if timestamp_col is not None and timestamp_col in df.columns:
-                self.preprocessed_data = pd.concat([df[[timestamp_col]], features_df], axis=1)
-            else:
-                self.preprocessed_data = features_df
-                
-            return True, f"Preprocessed {len(self.preprocessed_data)} rows with {len(self.feature_columns)} features"
-            
-        except Exception as e:
-            return False, f"Error during preprocessing: {str(e)}"
-            
-    def get_feature_stats(self):
-        """Get basic statistics for each feature"""
-        if self.data is None:
-            return None
-        
-        stats = {}
-        for col in self.feature_columns:
-            if col in self.data:
-                col_data = self.data[col]
-                stats[col] = {
-                    "mean": col_data.mean(),
-                    "std": col_data.std(),
-                    "min": col_data.min(),
-                    "max": col_data.max(),
-                    "nulls": col_data.isnull().sum()
-                }
-        return stats
+# Slice C Wave 1: DataProcessor
+from app.ingestion.data_processor import DataProcessor
 
-    def advanced_preprocess_data(self, timestamp_col=None, feature_cols=None, 
-                               preprocessing_steps=None):
-        """
-        Comprehensive data preprocessing pipeline
-        
-        Args:
-            timestamp_col (str): Name of timestamp column
-            feature_cols (list): List of feature columns to use
-            preprocessing_steps (dict): Dictionary of preprocessing steps to apply
-                Possible steps:
-                - normalize (bool): Standardize features
-                - remove_outliers (bool): Remove statistical outliers
-                - handle_missing (str): Strategy for missing values ('mean', 'median', 'drop')
-                - encode_categorical (bool): Encode categorical variables
-                - resample (str): Resample time series ('1H', '1D', etc.)
-                - smoothing (str): Apply smoothing ('moving_avg', 'ewm')
-                - feature_scaling (str): Scaling method ('standard', 'minmax', 'robust')
-                - dimension_reduction (str): PCA or other reduction technique
-        """
-        try:
-            if self.data is None:
-                return False, "No data loaded for preprocessing"
+# Slice C Wave 1: detectors
+from app.models.detectors import (
+    AnomalyDetectionModel,
+    EnhancedAnomalyDetectionModel,
+    ONLINE_LEARNING_AVAILABLE,
+    OnlineLearningAnomalyDetector,
+    PROPHET_AVAILABLE,
+    RIVER_AVAILABLE,
+    TENSORFLOW_AVAILABLE,
+)
 
-            # Create a copy of the data
-            df = self.data.copy()
-            preprocessing_steps = preprocessing_steps or {}
-            
-            # 1. Handle timestamp column
-            if timestamp_col and timestamp_col in df.columns:
-                try:
-                    df[timestamp_col] = pd.to_datetime(df[timestamp_col])
-                    df.sort_values(by=timestamp_col, inplace=True)
-                    self.timestamp_column = timestamp_col
-                    
-                    # Resample if specified
-                    if preprocessing_steps.get('resample'):
-                        df.set_index(timestamp_col, inplace=True)
-                        df = df.resample(preprocessing_steps['resample']).mean()
-                        df.reset_index(inplace=True)
-                except Exception as e:
-                    return False, f"Error processing timestamp: {str(e)}"
-
-            # 2. Select and validate features
-            if feature_cols:
-                available_cols = [col for col in feature_cols if col in df.columns]
-                if not available_cols:
-                    return False, "No specified features found in data"
-                df = df[available_cols + ([timestamp_col] if timestamp_col else [])]
-            
-            # 3. Handle missing values
-            missing_strategy = preprocessing_steps.get('handle_missing', 'mean')
-            if missing_strategy == 'drop':
-                df.dropna(inplace=True)
-            elif missing_strategy in ['mean', 'median']:
-                for col in df.select_dtypes(include=['number']).columns:
-                    if missing_strategy == 'mean':
-                        df[col].fillna(df[col].mean(), inplace=True)
-                    else:
-                        df[col].fillna(df[col].median(), inplace=True)
-
-            # 4. Handle categorical variables
-            if preprocessing_steps.get('encode_categorical', False):
-                categorical_columns = df.select_dtypes(include=['object', 'category']).columns
-                for col in categorical_columns:
-                    if col != timestamp_col:
-                        df = pd.get_dummies(df, columns=[col], prefix=[col])
-
-            # 5. Feature scaling
-            scaling_method = preprocessing_steps.get('feature_scaling')
-            if scaling_method:
-                numeric_cols = df.select_dtypes(include=['number']).columns
-                if scaling_method == 'standard':
-                    scaler = StandardScaler()
-                elif scaling_method == 'minmax':
-                    scaler = MinMaxScaler()
-                elif scaling_method == 'robust':
-                    from sklearn.preprocessing import RobustScaler
-                    scaler = RobustScaler()
-                
-                df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
-                self.scaler = scaler
-
-            # 6. Remove outliers
-            if preprocessing_steps.get('remove_outliers', False):
-                numeric_cols = df.select_dtypes(include=['number']).columns
-                for col in numeric_cols:
-                    if col != timestamp_col:
-                        z_scores = np.abs((df[col] - df[col].mean()) / df[col].std())
-                        df = df[z_scores < 3]
-
-            # 7. Apply smoothing
-            smoothing = preprocessing_steps.get('smoothing')
-            if smoothing:
-                numeric_cols = df.select_dtypes(include=['number']).columns
-                if smoothing == 'moving_avg':
-                    window_size = preprocessing_steps.get('window_size', 3)
-                    df[numeric_cols] = df[numeric_cols].rolling(window=window_size).mean()
-                elif smoothing == 'ewm':
-                    alpha = preprocessing_steps.get('alpha', 0.2)
-                    df[numeric_cols] = df[numeric_cols].ewm(alpha=alpha).mean()
-
-            # 8. Dimension reduction
-            if preprocessing_steps.get('dimension_reduction') == 'pca':
-                n_components = preprocessing_steps.get('n_components', 0.95)
-                numeric_cols = df.select_dtypes(include=['number']).columns
-                pca = PCA(n_components=n_components)
-                df_pca = pca.fit_transform(df[numeric_cols])
-                
-                # Replace numeric columns with PCA components
-                df = df.drop(columns=numeric_cols)
-                pca_cols = [f'PC{i+1}' for i in range(df_pca.shape[1])]
-                df = pd.concat([df, pd.DataFrame(df_pca, columns=pca_cols)], axis=1)
-                self.pca = pca
-
-            # Store preprocessed data and feature columns
-            self.preprocessed_data = df
-            self.feature_columns = [col for col in df.columns if col != timestamp_col]
-            
-            # Generate preprocessing summary
-            summary = {
-                'original_shape': self.data.shape,
-                'preprocessed_shape': df.shape,
-                'features': self.feature_columns,
-                'missing_values': df.isnull().sum().to_dict(),
-                'numeric_features': list(df.select_dtypes(include=['number']).columns),
-                'categorical_features': list(df.select_dtypes(include=['object', 'category']).columns)
-            }
-            
-            return True, {'message': 'Preprocessing completed successfully', 'summary': summary}
-
-        except Exception as e:
-            logger.error(f"Preprocessing error: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False, f"Error during preprocessing: {str(e)}"
-
-    def get_preprocessing_results(self):
-        """
-        Generate a comprehensive analysis of preprocessing results
-        
-        Returns:
-            dict: Dictionary containing preprocessing analysis and statistics
-        """
-        try:
-            if self.preprocessed_data is None:
-                return None, "No preprocessed data available"
-
-            results = {
-                "general_info": {
-                    "original_shape": self.data.shape if self.data is not None else None,
-                    "preprocessed_shape": self.preprocessed_data.shape,
-                    "rows_difference": len(self.data) - len(self.preprocessed_data) if self.data is not None else 0,
-                    "features_count": len(self.feature_columns) if self.feature_columns else 0,
-                    "timestamp_column": self.timestamp_column
-                },
-                
-                "data_quality": {
-                    "missing_values": {
-                        col: self.preprocessed_data[col].isnull().sum() 
-                        for col in self.preprocessed_data.columns
-                    },
-                    "unique_values": {
-                        col: self.preprocessed_data[col].nunique()
-                        for col in self.preprocessed_data.columns
-                    }
-                },
-                
-                "numerical_stats": {
-                    col: {
-                        "mean": self.preprocessed_data[col].mean(),
-                        "std": self.preprocessed_data[col].std(),
-                        "min": self.preprocessed_data[col].min(),
-                        "max": self.preprocessed_data[col].max(),
-                        "q25": self.preprocessed_data[col].quantile(0.25),
-                        "q50": self.preprocessed_data[col].quantile(0.50),
-                        "q75": self.preprocessed_data[col].quantile(0.75),
-                        "skewness": self.preprocessed_data[col].skew(),
-                        "kurtosis": self.preprocessed_data[col].kurtosis()
-                    }
-                    for col in self.preprocessed_data.select_dtypes(include=['number']).columns
-                },
-                
-                "temporal_stats": {} if self.timestamp_column is None else {
-                    "time_range": {
-                        "start": self.preprocessed_data[self.timestamp_column].min(),
-                        "end": self.preprocessed_data[self.timestamp_column].max(),
-                        "duration": str(self.preprocessed_data[self.timestamp_column].max() - 
-                                     self.preprocessed_data[self.timestamp_column].min())
-                    },
-                    "frequency": self.preprocessed_data[self.timestamp_column].diff().mean()
-                },
-                
-                "feature_correlations": self.preprocessed_data.select_dtypes(
-                    include=['number']).corr().to_dict() if len(self.preprocessed_data.select_dtypes(
-                    include=['number']).columns) > 1 else {},
-                
-                "outlier_summary": {
-                    col: {
-                        "outliers_count": len(self.preprocessed_data[
-                            (self.preprocessed_data[col] > 
-                             self.preprocessed_data[col].mean() + 3 * self.preprocessed_data[col].std()) |
-                            (self.preprocessed_data[col] < 
-                             self.preprocessed_data[col].mean() - 3 * self.preprocessed_data[col].std())
-                        ]),
-                        "outliers_percentage": (len(self.preprocessed_data[
-                            (self.preprocessed_data[col] > 
-                             self.preprocessed_data[col].mean() + 3 * self.preprocessed_data[col].std()) |
-                            (self.preprocessed_data[col] < 
-                             self.preprocessed_data[col].mean() - 3 * self.preprocessed_data[col].std())
-                        ]) / len(self.preprocessed_data)) * 100
-                    }
-                    for col in self.preprocessed_data.select_dtypes(include=['number']).columns
-                }
-            }
-            
-            # Add data distribution analysis
-            if self.preprocessed_data is not None:
-                results["distribution_tests"] = {
-                    col: {
-                        "normality": {
-                            "shapiro": stats.shapiro(
-                                self.preprocessed_data[col].dropna()
-                            ) if len(self.preprocessed_data[col].dropna()) >= 3 else None
-                        },
-                        "stationarity": {
-                            "adf_test": adfuller(
-                                self.preprocessed_data[col].dropna()
-                            ) if len(self.preprocessed_data[col].dropna()) >= 3 else None
-                        }
-                    }
-                    for col in self.preprocessed_data.select_dtypes(include=['number']).columns
-                }
-            
-            return True, results
-
-        except Exception as e:
-            logger.error(f"Error generating preprocessing results: {str(e)}")
-            return False, f"Error analyzing preprocessing results: {str(e)}"
-
-    def format_preprocessing_results(self, results):
-        """
-        Format preprocessing results into a human-readable format
-        
-        Args:
-            results (dict): Results from get_preprocessing_results()
-            
-        Returns:
-            str: Formatted string containing analysis results
-        """
-        if not results:
-            return "No preprocessing results available"
-
-        formatted_output = []
-        formatted_output.append("=== Preprocessing Analysis Report ===\n")
-        
-        # General Information
-        formatted_output.append("General Information:")
-        gen_info = results["general_info"]
-        formatted_output.append(f"- Original data shape: {gen_info['original_shape']}")
-        formatted_output.append(f"- Preprocessed data shape: {gen_info['preprocessed_shape']}")
-        formatted_output.append(f"- Rows removed: {gen_info['rows_difference']}")
-        formatted_output.append(f"- Features used: {gen_info['features_count']}")
-        formatted_output.append(f"- Timestamp column: {gen_info['timestamp_column']}\n")
-        
-        # Data Quality
-        formatted_output.append("Data Quality:")
-        for col, missing in results["data_quality"]["missing_values"].items():
-            if missing > 0:
-                formatted_output.append(f"- {col}: {missing} missing values")
-        formatted_output.append("")
-        
-        # Numerical Statistics
-        formatted_output.append("Numerical Statistics:")
-        for col, stats in results["numerical_stats"].items():
-            formatted_output.append(f"\n{col}:")
-            formatted_output.append(f"- Mean: {stats['mean']:.2f}")
-            formatted_output.append(f"- Std: {stats['std']:.2f}")
-            formatted_output.append(f"- Range: [{stats['min']:.2f}, {stats['max']:.2f}]")
-            formatted_output.append(f"- Quartiles: {stats['q25']:.2f}, {stats['q50']:.2f}, {stats['q75']:.2f}")
-        
-        # Temporal Statistics
-        if results["temporal_stats"]:
-            formatted_output.append("\nTemporal Statistics:")
-            time_range = results["temporal_stats"]["time_range"]
-            formatted_output.append(f"- Time range: {time_range['start']} to {time_range['end']}")
-            formatted_output.append(f"- Duration: {time_range['duration']}")
-            formatted_output.append(f"- Average frequency: {results['temporal_stats']['frequency']}\n")
-        
-        # Outlier Summary
-        formatted_output.append("Outlier Summary:")
-        for col, outlier_stats in results["outlier_summary"].items():
-            if outlier_stats["outliers_count"] > 0:
-                formatted_output.append(
-                    f"- {col}: {outlier_stats['outliers_count']} outliers "
-                    f"({outlier_stats['outliers_percentage']:.2f}%)"
-                )
-        
-        return "\n".join(formatted_output)
-
-# Anomaly detection models
-import joblib
-import warnings
-
-# For deep learning models
-try:
-    import tensorflow as tf
-    from tensorflow.keras.models import Sequential, Model # type: ignore
-    from tensorflow.keras.layers import Dense, LSTM, Input, Dropout, RepeatVector, TimeDistributed, GRU # type: ignore
-    from tensorflow.keras.callbacks import EarlyStopping # type: ignore
-    from tensorflow.keras.optimizers import Adam# type: ignore
-    TENSORFLOW_AVAILABLE = True
-except ImportError:
-    TENSORFLOW_AVAILABLE = False
-    warnings.warn("TensorFlow not available. Deep learning models will be disabled.")
-
-# For Prophet models
-try:
-    from prophet import Prophet
-    PROPHET_AVAILABLE = True
-except ImportError:
-    PROPHET_AVAILABLE = False
-    warnings.warn("Prophet not available. Prophet models will be disabled.")
-
-# For online learning and reinforcement learning
-try:
-    from sklearn.linear_model import SGDOneClassSVM, PassiveAggressiveClassifier
-    from sklearn.ensemble import ExtraTreesClassifier  
-    from sklearn.tree import ExtraTreeClassifier
-    ONLINE_LEARNING_AVAILABLE = True
-except ImportError:
-    ONLINE_LEARNING_AVAILABLE = False
-    warnings.warn("Online learning models not available.")
-
-# For River (online machine learning library)
-try:
-    from river import anomaly, compose, preprocessing, metrics
-    from river.tree import HoeffdingTreeClassifier
-    RIVER_AVAILABLE = True
-except ImportError:
-    RIVER_AVAILABLE = False
-    warnings.warn("River online learning library not available. Install with: pip install river")
-
-class EnhancedAnomalyDetectionModel:
-    """Enhanced anomaly detection model with improved performance and ensemble methods"""
-    
-    def __init__(self, model_type="enhanced_isolation_forest"):
-        self.model_type = model_type
-        self.model = None
-        self.scaler = None
-        self.feature_selector = None
-        self.feature_columns = None
-        self.sequence_length = 10
-        self.reconstruction_error_threshold = None
-        self.history = None
-        self.metrics = {}
-        self.X_train = None  # Store training data for metrics
-        self.ensemble_models = []  # For ensemble methods
-        self.preprocessing_pipeline = None
-        self.model_params = {}  # Store best parameters
-        
-    def create_preprocessing_pipeline(self, preprocessing_type="standard"):
-        """Create an advanced preprocessing pipeline"""
-        try:
-            if preprocessing_type == "standard":
-                pipeline_steps = [
-                    ('scaler', StandardScaler()),
-                    ('feature_selector', SelectKBest(score_func=f_classif, k='all'))
-                ]
-            elif preprocessing_type == "robust":
-                pipeline_steps = [
-                    ('power_transformer', PowerTransformer(method='yeo-johnson')),
-                    ('robust_scaler', RobustScaler()),
-                    ('feature_selector', SelectKBest(score_func=mutual_info_classif, k='all'))
-                ]
-            elif preprocessing_type == "pca":
-                pipeline_steps = [
-                    ('scaler', StandardScaler()),
-                    ('pca', PCA(n_components=0.95))
-                ]
-            else:
-                pipeline_steps = [('scaler', StandardScaler())]
-            
-            self.preprocessing_pipeline = Pipeline(pipeline_steps)
-            return True, "Preprocessing pipeline created successfully"
-            
-        except Exception as e:
-            logger.error(f"Error creating preprocessing pipeline: {str(e)}")
-            return False, f"Failed to create pipeline: {str(e)}"
-    
-    def hyperparameter_tuning(self, X, model_type, cv_folds=3):
-        """Perform hyperparameter tuning for the model"""
-        try:
-            if model_type == "enhanced_isolation_forest":
-                param_grid = {
-                    'n_estimators': [50, 100, 200],
-                    'contamination': [0.05, 0.1, 0.15, 0.2],
-                    'max_features': [0.5, 0.7, 1.0],
-                    'bootstrap': [True, False]
-                }
-                base_model = IsolationForest(random_state=42)
-                
-            elif model_type == "one_class_svm":
-                param_grid = {
-                    'nu': [0.01, 0.05, 0.1, 0.2],
-                    'kernel': ['rbf', 'linear', 'poly'],
-                    'gamma': ['scale', 'auto', 0.001, 0.01, 0.1]
-                }
-                base_model = OneClassSVM()
-                
-            elif model_type == "elliptic_envelope":
-                param_grid = {
-                    'contamination': [0.05, 0.1, 0.15, 0.2],
-                    'support_fraction': [None, 0.5, 0.7, 0.9]
-                }
-                base_model = EllipticEnvelope(random_state=42)
-                
-            else:
-                return None, f"Hyperparameter tuning not implemented for {model_type}"
-            
-            # Use TimeSeriesSplit for time series data or regular CV for other data
-            cv = TimeSeriesSplit(n_splits=cv_folds)
-            
-            # Custom scoring function for unsupervised anomaly detection
-            def anomaly_score(estimator, X):
-                try:
-                    if hasattr(estimator, 'decision_function'):
-                        scores = estimator.decision_function(X)
-                        return np.mean(scores)  # Higher is better for normal points
-                    elif hasattr(estimator, 'score_samples'):
-                        scores = estimator.score_samples(X)
-                        return np.mean(scores)  # Higher is better
-                    else:
-                        return 0
-                except:
-                    return 0
-            
-            # Perform grid search
-            grid_search = GridSearchCV(
-                estimator=base_model,
-                param_grid=param_grid,
-                cv=cv,
-                scoring=anomaly_score,
-                n_jobs=-1,
-                verbose=1
-            )
-            
-            grid_search.fit(X)
-            
-            self.model_params = grid_search.best_params_
-            return grid_search.best_estimator_, f"Best parameters found: {self.model_params}"
-            
-        except Exception as e:
-            logger.error(f"Hyperparameter tuning failed: {str(e)}")
-            return None, f"Tuning failed: {str(e)}"
-    
-    def create_ensemble_model(self, X, ensemble_type="voting"):
-        """Create ensemble of anomaly detection models"""
-        try:
-            if ensemble_type == "voting":
-                # Create multiple diverse models
-                models = [
-                    ('isolation_forest', IsolationForest(
-                        n_estimators=100, contamination=0.1, random_state=42)),
-                    ('one_class_svm', OneClassSVM(nu=0.1, kernel='rbf')),
-                    ('elliptic_envelope', EllipticEnvelope(contamination=0.1, random_state=42)),
-                    ('lof', LocalOutlierFactor(n_neighbors=20, contamination=0.1, novelty=True))
-                ]
-                
-                # Train all models
-                trained_models = []
-                for name, model in models:
-                    try:
-                        model.fit(X)
-                        trained_models.append((name, model))
-                    except Exception as e:
-                        logger.warning(f"Failed to train {name}: {str(e)}")
-                        continue
-                
-                self.ensemble_models = trained_models
-                return True, f"Ensemble created with {len(trained_models)} models"
-                
-            elif ensemble_type == "stacking":
-                # Implement stacking ensemble
-                base_models = [
-                    IsolationForest(n_estimators=100, contamination=0.1, random_state=42),
-                    OneClassSVM(nu=0.1, kernel='rbf'),
-                    EllipticEnvelope(contamination=0.1, random_state=42)
-                ]
-                
-                # Train base models and collect predictions
-                base_predictions = []
-                for model in base_models:
-                    try:
-                        model.fit(X)
-                        if hasattr(model, 'decision_function'):
-                            pred = model.decision_function(X)
-                        else:
-                            pred = model.predict(X)
-                        base_predictions.append(pred)
-                    except Exception as e:
-                        logger.warning(f"Base model training failed: {str(e)}")
-                        continue
-                
-                if base_predictions:
-                    # Stack predictions
-                    stacked_features = np.column_stack(base_predictions)
-                    
-                    # Train meta-learner (using Isolation Forest as meta-learner)
-                    meta_learner = IsolationForest(contamination=0.1, random_state=42)
-                    meta_learner.fit(stacked_features)
-                    
-                    self.ensemble_models = base_models
-                    self.meta_learner = meta_learner
-                    return True, "Stacking ensemble created successfully"
-                
-                return False, "No base models trained successfully for stacking"
-            
-            else:
-                return False, f"Unsupported ensemble type: {ensemble_type}"
-                
-        except Exception as e:
-            logger.error(f"Ensemble creation failed: {str(e)}")
-            return False, f"Ensemble failed: {str(e)}"
-    
-    def train_enhanced_model(self, data, **kwargs):
-        """Train enhanced anomaly detection models with better performance"""
-        try:
-            # Data validation and preparation
-            if not isinstance(data, pd.DataFrame):
-                return False, "Training data must be a pandas DataFrame"
-                
-            numeric_data = data.select_dtypes(include=['number'])
-            if numeric_data.empty:
-                return False, "No numeric columns found in the training data"
-            
-            self.feature_columns = list(numeric_data.columns)
-            
-            # Create and fit preprocessing pipeline
-            preprocessing_type = kwargs.get('preprocessing_type', 'standard')
-            success, message = self.create_preprocessing_pipeline(preprocessing_type)
-            if not success:
-                return False, message
-            
-            # Apply preprocessing
-            X = self.preprocessing_pipeline.fit_transform(numeric_data)
-            self.X_train = X  # Store for metrics calculation
-            
-            # Model-specific training
-            if self.model_type == "enhanced_isolation_forest":
-                # Use hyperparameter tuning
-                use_tuning = kwargs.get('use_hyperparameter_tuning', True)
-                if use_tuning:
-                    tuned_model, tune_message = self.hyperparameter_tuning(X, self.model_type)
-                    if tuned_model is not None:
-                        self.model = tuned_model
-                        return True, f"Enhanced Isolation Forest trained with tuning: {tune_message}"
-                
-                # Fallback to default enhanced parameters
-                self.model = IsolationForest(
-                    n_estimators=kwargs.get('n_estimators', 200),
-                    contamination=kwargs.get('contamination', 0.1),
-                    max_features=kwargs.get('max_features', 0.8),
-                    bootstrap=kwargs.get('bootstrap', True),
-                    random_state=42
-                )
-                self.model.fit(X)
-                return True, "Enhanced Isolation Forest trained successfully"
-                
-            elif self.model_type == "ensemble_voting":
-                success, message = self.create_ensemble_model(X, "voting")
-                return success, message
-                
-            elif self.model_type == "ensemble_stacking":
-                success, message = self.create_ensemble_model(X, "stacking")
-                return success, message
-                
-            elif self.model_type == "adaptive_threshold":
-                # Adaptive threshold model using multiple methods
-                models = {
-                    'isolation_forest': IsolationForest(n_estimators=100, contamination=0.1, random_state=42),
-                    'elliptic_envelope': EllipticEnvelope(contamination=0.1, random_state=42),
-                    'one_class_svm': OneClassSVM(nu=0.1, kernel='rbf')
-                }
-                
-                trained_models = {}
-                thresholds = {}
-                
-                for name, model in models.items():
-                    try:
-                        model.fit(X)
-                        if hasattr(model, 'decision_function'):
-                            scores = model.decision_function(X)
-                            # Adaptive threshold based on data distribution
-                            threshold = np.percentile(scores, kwargs.get('threshold_percentile', 10))
-                            thresholds[name] = threshold
-                        trained_models[name] = model
-                    except Exception as e:
-                        logger.warning(f"Failed to train {name}: {str(e)}")
-                
-                self.ensemble_models = trained_models
-                self.adaptive_thresholds = thresholds
-                return True, f"Adaptive threshold model trained with {len(trained_models)} base models"
-                
-            else:
-                return False, f"Unsupported enhanced model type: {self.model_type}"
-                
-        except Exception as e:
-            logger.error(f"Enhanced training error: {str(e)}")
-            return False, f"Training failed: {str(e)}"
-
-    def train(self, data, **kwargs):
-        """Backward-compatible train entrypoint used by UI/worker code."""
-        return self.train_enhanced_model(data, **kwargs)
-    
-    def predict_enhanced(self, data):
-        """Enhanced prediction with ensemble voting and confidence scores"""
-        try:
-            if not self.preprocessing_pipeline:
-                return None, "Model not trained or preprocessing pipeline missing"
-            
-            # Prepare data using the same preprocessing pipeline
-            numeric_data = data.select_dtypes(include=['number'])
-            if numeric_data.empty:
-                return None, "No numeric columns found in prediction data"
-            
-            # Apply preprocessing
-            X = self.preprocessing_pipeline.transform(numeric_data)
-            
-            if self.model_type == "enhanced_isolation_forest":
-                if self.model is None:
-                    return None, "Model not trained"
-                
-                scores = self.model.decision_function(X)
-                predictions = self.model.predict(X)
-                anomalies = (predictions == -1)
-                
-                # Calculate confidence scores
-                confidence_scores = np.abs(scores) / (np.abs(scores).max() + 1e-8)
-                
-                return {
-                    'anomalies': anomalies,
-                    'scores': scores,
-                    'confidence': confidence_scores,
-                    'method': 'enhanced_isolation_forest'
-                }, "Enhanced Isolation Forest prediction completed"
-                
-            elif self.model_type in ["ensemble_voting", "ensemble_stacking"]:
-                if not self.ensemble_models:
-                    return None, "Ensemble models not trained"
-                
-                all_predictions = []
-                all_scores = []
-                
-                # Get predictions from all ensemble models
-                for name, model in self.ensemble_models:
-                    try:
-                        if hasattr(model, 'decision_function'):
-                            scores = model.decision_function(X)
-                            predictions = model.predict(X)
-                        elif hasattr(model, 'predict'):
-                            predictions = model.predict(X)
-                            scores = np.ones_like(predictions)  # Default scores
-                        else:
-                            continue
-                        
-                        all_predictions.append(predictions == -1)  # Convert to boolean
-                        all_scores.append(scores)
-                        
-                    except Exception as e:
-                        logger.warning(f"Prediction failed for {name}: {str(e)}")
-                        continue
-                
-                if not all_predictions:
-                    return None, "No ensemble models produced valid predictions"
-                
-                # Majority voting for final prediction
-                prediction_matrix = np.array(all_predictions)
-                ensemble_anomalies = np.mean(prediction_matrix, axis=0) > 0.5
-                
-                # Average confidence scores
-                if all_scores:
-                    average_scores = np.mean(all_scores, axis=0)
-                    confidence_scores = np.abs(average_scores) / (np.abs(average_scores).max() + 1e-8)
-                else:
-                    confidence_scores = np.ones(len(ensemble_anomalies)) * 0.5
-                
-                return {
-                    'anomalies': ensemble_anomalies,
-                    'scores': average_scores if all_scores else np.zeros(len(ensemble_anomalies)),
-                    'confidence': confidence_scores,
-                    'individual_predictions': all_predictions,
-                    'method': self.model_type
-                }, f"Ensemble prediction completed with {len(all_predictions)} models"
-                
-            elif self.model_type == "adaptive_threshold":
-                if not self.ensemble_models or not hasattr(self, 'adaptive_thresholds'):
-                    return None, "Adaptive threshold models not trained"
-                
-                adaptive_predictions = []
-                adaptive_scores = []
-                
-                for name, model in self.ensemble_models.items():
-                    try:
-                        if hasattr(model, 'decision_function'):
-                            scores = model.decision_function(X)
-                            threshold = self.adaptive_thresholds.get(name, 0)
-                            predictions = scores < threshold  # Below threshold = anomaly
-                        else:
-                            predictions = model.predict(X) == -1
-                            scores = np.ones_like(predictions, dtype=float)
-                        
-                        adaptive_predictions.append(predictions)
-                        adaptive_scores.append(scores)
-                        
-                    except Exception as e:
-                        logger.warning(f"Adaptive prediction failed for {name}: {str(e)}")
-                        continue
-                
-                if not adaptive_predictions:
-                    return None, "No adaptive models produced valid predictions"
-                
-                # Weighted voting based on model performance
-                prediction_matrix = np.array(adaptive_predictions)
-                final_anomalies = np.mean(prediction_matrix, axis=0) > 0.5
-                
-                # Calculate confidence as consistency across models
-                confidence_scores = 1.0 - np.std(prediction_matrix.astype(float), axis=0)
-                
-                return {
-                    'anomalies': final_anomalies,
-                    'scores': np.mean(adaptive_scores, axis=0) if adaptive_scores else np.zeros(len(final_anomalies)),
-                    'confidence': confidence_scores,
-                    'method': 'adaptive_threshold'
-                }, "Adaptive threshold prediction completed"
-                
-            else:
-                return None, f"Prediction not implemented for {self.model_type}"
-                
-        except Exception as e:
-            logger.error(f"Enhanced prediction error: {str(e)}")
-            return None, f"Prediction failed: {str(e)}"
-
-    def predict(self, data):
-        """Return legacy (scores, anomalies) tuple for existing callers."""
-        prediction_result, message = self.predict_enhanced(data)
-        if prediction_result is None:
-            return None, message
-
-        if isinstance(prediction_result, dict):
-            scores = prediction_result.get("scores")
-            anomalies = prediction_result.get("anomalies")
-            if scores is not None and anomalies is not None:
-                return scores, anomalies
-
-        return None, "Enhanced prediction output format is invalid"
-    
-    def save(self, filepath):
-        """Save enhanced model to file"""
-        if self.model is None and not self.ensemble_models:
-            return False, "No model to save"
-            
-        try:
-            active_model_type = getattr(self, "resolved_model_type", self._runtime_model_type())
-            # Ensure filepath has .pkl extension
-            if not filepath.endswith('.pkl'):
-                filepath = filepath + '.pkl'
-                
-            # Create directory if needed
-            directory = os.path.dirname(filepath)
-            if directory and not os.path.exists(directory):
-                os.makedirs(directory, exist_ok=True)
-            
-            # Prepare enhanced model data
-            model_data = {
-                "model_type": self.model_type,
-                "model": self.model,
-                "preprocessing_pipeline": getattr(self, 'preprocessing_pipeline', None),
-                "ensemble_models": getattr(self, 'ensemble_models', []),
-                "adaptive_thresholds": getattr(self, 'adaptive_thresholds', {}),
-                "model_params": getattr(self, 'model_params', {}),
-                "feature_columns": getattr(self, 'feature_columns', None),
-                "X_train": getattr(self, 'X_train', None),
-                "metrics": getattr(self, 'metrics', {})
-            }
-            
-            # Add meta-learner if it exists (for stacking ensemble)
-            if hasattr(self, 'meta_learner'):
-                model_data["meta_learner"] = self.meta_learner
-            
-            with open(filepath, 'wb') as f:
-                pickle.dump(model_data, f)
-                
-            return True, f"Enhanced model saved to {filepath}"
-            
-        except Exception as e:
-            logger.error(f"Enhanced model save error: {str(e)}")
-            return False, f"Error saving enhanced model: {str(e)}"
-    
-    @staticmethod
-    def load(filepath):
-        """Load enhanced model from file"""
-        try:
-            # Check if file exists
-            if not os.path.exists(filepath):
-                return None, f"Model file not found: {filepath}"
-                
-            model_data = safe_pickle_load(filepath)
-            
-            if not isinstance(model_data, dict) or "model_type" not in model_data:
-                return None, "Invalid enhanced model file format"
-            
-            # Create enhanced model instance
-            model = EnhancedAnomalyDetectionModel(model_data["model_type"])
-            
-            # Load all attributes
-            model.model = model_data.get("model")
-            model.preprocessing_pipeline = model_data.get("preprocessing_pipeline")
-            model.ensemble_models = model_data.get("ensemble_models", [])
-            model.adaptive_thresholds = model_data.get("adaptive_thresholds", {})
-            model.model_params = model_data.get("model_params", {})
-            model.feature_columns = model_data.get("feature_columns")
-            model.X_train = model_data.get("X_train")
-            model.metrics = model_data.get("metrics", {})
-            
-            # Load meta-learner if it exists
-            if "meta_learner" in model_data:
-                model.meta_learner = model_data["meta_learner"]
-            
-            return model, f"Enhanced model loaded successfully from {filepath}"
-            
-        except Exception as e:
-            logger.error(f"Enhanced model load error: {str(e)}")
-            return None, f"Error loading enhanced model: {str(e)}"
-
-class OnlineLearningAnomalyDetector:
-    """Online Learning Anomaly Detection with Reinforcement Learning capabilities"""
-    
-    def __init__(self, model_type="incremental_isolation_forest", learning_rate=0.01):
-        self.model_type = model_type
-        self.learning_rate = learning_rate
-        self.model = None
-        self.scaler = None
-        self.online_scaler = None
-        self.feature_columns = None
-        self.window_size = 1000  # Sliding window for online learning
-        self.data_buffer = []
-        self.anomaly_buffer = []
-        self.performance_metrics = {}
-        self.adaptation_threshold = 0.1  # Threshold for model adaptation
-        self.feedback_history = []  # Store feedback for RL
-        self.reward_history = []
-        self.state_history = []
-        self.action_history = []
-        
-        # RL components
-        self.q_table = {}  # Q-learning table for simple RL
-        self.epsilon = 0.1  # Exploration rate
-        self.gamma = 0.9  # Discount factor
-        self.alpha = 0.1  # Learning rate for Q-learning
-        
-        # Performance tracking
-        self.model_performance = []
-        self.concept_drift_detector = None
-        
-    def initialize_online_model(self, initial_data=None):
-        """Initialize the online learning model"""
-        try:
-            if self.model_type == "incremental_isolation_forest":
-                # Use a combination of incremental models
-                self.model = {
-                    'sgd_ocsvm': SGDOneClassSVM(learning_rate='constant', eta0=self.learning_rate),
-                    'passive_aggressive': PassiveAggressiveClassifier(random_state=42),
-                    'extra_tree': ExtraTreeClassifier(random_state=42)
-                }
-                
-            elif self.model_type == "river_anomaly" and RIVER_AVAILABLE:
-                # Use River online learning library
-                self.model = compose.Pipeline(
-                    preprocessing.StandardScaler(),
-                    anomaly.HalfSpaceTrees(n_trees=10, height=8)
-                )
-                
-            elif self.model_type == "reinforcement_learning":
-                # Custom RL-based anomaly detector
-                self.model = None  # Will be initialized dynamically
-                self.initialize_rl_components()
-                
-            else:
-                return False, f"Unsupported online model type: {self.model_type}"
-            
-            # Initialize online scaling
-            self.online_scaler = preprocessing.StandardScaler() if RIVER_AVAILABLE else StandardScaler()
-            
-            # Initialize with initial data if provided
-            if initial_data is not None:
-                self.warm_start(initial_data)
-                
-            return True, f"Online learning model '{self.model_type}' initialized successfully"
-            
-        except Exception as e:
-            logger.error(f"Online model initialization failed: {str(e)}")
-            return False, f"Initialization failed: {str(e)}"
-    
-    def initialize_rl_components(self):
-        """Initialize reinforcement learning components"""
-        # Define states (simplified): normal, suspicious, anomalous
-        self.states = ['normal', 'suspicious', 'anomalous']
-        
-        # Define actions: keep_threshold, increase_sensitivity, decrease_sensitivity, retrain
-        self.actions = ['keep', 'increase_sens', 'decrease_sens', 'retrain']
-        
-        # Initialize Q-table
-        for state in self.states:
-            self.q_table[state] = {action: 0.0 for action in self.actions}
-        
-        # Initialize base anomaly detection model
-        self.base_model = IsolationForest(contamination=0.1, random_state=42)
-        
-    def warm_start(self, initial_data):
-        """Warm start the model with initial data"""
-        try:
-            if not isinstance(initial_data, pd.DataFrame):
-                return False, "Initial data must be a pandas DataFrame"
-            
-            numeric_data = initial_data.select_dtypes(include=['number'])
-            if numeric_data.empty:
-                return False, "No numeric columns found"
-                
-            self.feature_columns = list(numeric_data.columns)
-            
-            if self.model_type == "incremental_isolation_forest":
-                # Warm start incremental models
-                X = StandardScaler().fit_transform(numeric_data)
-                
-                # Initialize base model for reference
-                base_model = IsolationForest(contamination=0.1, random_state=42)
-                base_model.fit(X)
-                base_predictions = base_model.predict(X)
-                
-                # Train incremental models
-                y = (base_predictions == -1).astype(int)  # Convert to binary labels
-                
-                if 'sgd_ocsvm' in self.model:
-                    # For one-class SVM, we only use normal data
-                    normal_data = X[y == 0]
-                    if len(normal_data) > 0:
-                        self.model['sgd_ocsvm'].fit(normal_data, np.ones(len(normal_data)))
-                
-                if 'passive_aggressive' in self.model:
-                    self.model['passive_aggressive'].fit(X, y)
-                
-                if 'extra_tree' in self.model:
-                    self.model['extra_tree'].fit(X, y)
-                    
-            elif self.model_type == "river_anomaly" and RIVER_AVAILABLE:
-                # Warm start River model
-                for _, row in numeric_data.iterrows():
-                    x = {str(i): float(val) for i, val in enumerate(row)}
-                    self.model.learn_one(x)
-                    
-            elif self.model_type == "reinforcement_learning":
-                # Warm start RL model
-                X = StandardScaler().fit_transform(numeric_data)
-                self.base_model.fit(X)
-                
-                # Initialize states based on initial data distribution
-                scores = self.base_model.decision_function(X)
-                self.normal_threshold = np.percentile(scores, 10)
-                self.suspicious_threshold = np.percentile(scores, 5)
-                
-            return True, "Warm start completed successfully"
-            
-        except Exception as e:
-            logger.error(f"Warm start failed: {str(e)}")
-            return False, f"Warm start failed: {str(e)}"
-    
-    def learn_online(self, new_data, feedback=None):
-        """Learn from new data point(s) online"""
-        try:
-            if not isinstance(new_data, pd.DataFrame):
-                if isinstance(new_data, (list, np.ndarray)):
-                    new_data = pd.DataFrame([new_data], columns=self.feature_columns)
-                else:
-                    return False, "Invalid data format for online learning"
-            
-            numeric_data = new_data.select_dtypes(include=['number'])
-            if numeric_data.empty:
-                return False, "No numeric columns found"
-            
-            # Update data buffer
-            self.data_buffer.extend(numeric_data.values.tolist())
-            if len(self.data_buffer) > self.window_size:
-                self.data_buffer = self.data_buffer[-self.window_size:]
-            
-            # Learn based on model type
-            if self.model_type == "incremental_isolation_forest":
-                success, message = self._learn_incremental(numeric_data, feedback)
-                
-            elif self.model_type == "river_anomaly" and RIVER_AVAILABLE:
-                success, message = self._learn_river(numeric_data, feedback)
-                
-            elif self.model_type == "reinforcement_learning":
-                success, message = self._learn_reinforcement(numeric_data, feedback)
-                
-            else:
-                return False, f"Online learning not implemented for {self.model_type}"
-            
-            # Check for concept drift and adapt if necessary
-            self._check_concept_drift()
-            
-            return success, message
-            
-        except Exception as e:
-            logger.error(f"Online learning failed: {str(e)}")
-            return False, f"Online learning failed: {str(e)}"
-    
-    def _learn_incremental(self, new_data, feedback=None):
-        """Incremental learning for sklearn-based models"""
-        try:
-            X = new_data.values
-            
-            # Make predictions first
-            predictions = self.predict_online(new_data)
-            if predictions is None:
-                return False, "Failed to get predictions for learning"
-            
-            # Update models based on feedback or self-supervision
-            if feedback is not None:
-                # Supervised learning with feedback
-                y = np.array(feedback).astype(int)
-                
-                if 'passive_aggressive' in self.model:
-                    self.model['passive_aggressive'].partial_fit(X, y)
-                    
-            else:
-                # Self-supervised learning - use ensemble voting
-                all_preds = []
-                
-                # Get predictions from all available models
-                for name, model in self.model.items():
-                    try:
-                        if name == 'sgd_ocsvm':
-                            pred = model.predict(X)
-                            all_preds.append((pred == 1))  # Convert to boolean
-                        elif name == 'passive_aggressive':
-                            if hasattr(model, 'predict'):
-                                pred = model.predict(X)
-                                all_preds.append((pred == 1))
-                        elif name == 'extra_tree':
-                            if hasattr(model, 'predict'):
-                                pred = model.predict(X)
-                                all_preds.append((pred == 1))
-                    except:
-                        continue
-                
-                # Use majority voting as pseudo-labels
-                if all_preds:
-                    ensemble_pred = np.mean(all_preds, axis=0) > 0.5
-                    y = ensemble_pred.astype(int)
-                    
-                    # Update models that support partial_fit
-                    if 'passive_aggressive' in self.model:
-                        try:
-                            self.model['passive_aggressive'].partial_fit(X, y)
-                        except:
-                            pass
-            
-            return True, "Incremental learning completed"
-            
-        except Exception as e:
-            return False, f"Incremental learning failed: {str(e)}"
-    
-    def _learn_river(self, new_data, feedback=None):
-        """Online learning using River library"""
-        try:
-            if not RIVER_AVAILABLE:
-                return False, "River library not available"
-            
-            for _, row in new_data.iterrows():
-                x = {str(i): float(val) for i, val in enumerate(row)}
-                
-                # Learn from the new data point
-                self.model.learn_one(x)
-                
-                # If feedback is provided, we can use it for supervised learning
-                if feedback is not None:
-                    # River models are typically unsupervised, but we can track performance
-                    pass
-            
-            return True, "River online learning completed"
-            
-        except Exception as e:
-            return False, f"River learning failed: {str(e)}"
-    
-    def _learn_reinforcement(self, new_data, feedback=None):
-        """Reinforcement learning-based adaptation"""
-        try:
-            X = new_data.values
-            
-            # Get current state
-            current_state = self._get_current_state(X)
-            
-            # Get current performance (reward)
-            reward = self._calculate_reward(X, feedback)
-            
-            # Update Q-learning if we have previous state-action pair
-            if hasattr(self, 'last_state') and hasattr(self, 'last_action'):
-                self._update_q_table(self.last_state, self.last_action, reward, current_state)
-            
-            # Choose action using epsilon-greedy strategy
-            action = self._choose_action(current_state)
-            
-            # Execute action
-            self._execute_action(action, X)
-            
-            # Store current state and action for next update
-            self.last_state = current_state
-            self.last_action = action
-            
-            # Store history
-            self.state_history.append(current_state)
-            self.action_history.append(action)
-            self.reward_history.append(reward)
-            if feedback is not None:
-                self.feedback_history.append(feedback)
-            
-            return True, f"RL learning completed - State: {current_state}, Action: {action}, Reward: {reward:.3f}"
-            
-        except Exception as e:
-            return False, f"RL learning failed: {str(e)}"
-    
-    def _get_current_state(self, X):
-        """Determine current state based on recent performance"""
-        try:
-            if self.base_model is None:
-                return 'normal'
-            
-            scores = self.base_model.decision_function(X)
-            avg_score = np.mean(scores)
-            
-            if avg_score < self.suspicious_threshold:
-                return 'anomalous'
-            elif avg_score < self.normal_threshold:
-                return 'suspicious'
-            else:
-                return 'normal'
-                
-        except:
-            return 'normal'
-    
-    def _calculate_reward(self, X, feedback=None):
-        """Calculate reward for RL learning"""
-        try:
-            if feedback is not None:
-                # Use feedback to calculate reward
-                predictions = self.predict_online(pd.DataFrame(X, columns=self.feature_columns))
-                if predictions is not None:
-                    accuracy = np.mean(predictions['anomalies'] == np.array(feedback).astype(bool))
-                    return accuracy * 2 - 1  # Scale to [-1, 1]
-            
-            # Use consistency and confidence as reward
-            predictions = self.predict_online(pd.DataFrame(X, columns=self.feature_columns))
-            if predictions is not None:
-                confidence = np.mean(predictions.get('confidence', [0.5]))
-                return confidence * 2 - 1  # Scale to [-1, 1]
-            
-            return 0.0
-            
-        except:
-            return 0.0
-    
-    def _update_q_table(self, state, action, reward, next_state):
-        """Update Q-table using Q-learning update rule"""
-        try:
-            current_q = self.q_table[state][action]
-            max_next_q = max(self.q_table[next_state].values())
-            
-            # Q-learning update
-            new_q = current_q + self.alpha * (reward + self.gamma * max_next_q - current_q)
-            self.q_table[state][action] = new_q
-            
-        except Exception as e:
-            logger.warning(f"Q-table update failed: {str(e)}")
-    
-    def _choose_action(self, state):
-        """Choose action using epsilon-greedy strategy"""
-        try:
-            if np.random.random() < self.epsilon:
-                # Explore: choose random action
-                return np.random.choice(self.actions)
-            else:
-                # Exploit: choose best action
-                return max(self.q_table[state], key=self.q_table[state].get)
-                
-        except:
-            return 'keep'  # Default action
-    
-    def _execute_action(self, action, X):
-        """Execute the chosen action"""
-        try:
-            if action == 'increase_sens':
-                # Increase sensitivity by lowering thresholds
-                self.suspicious_threshold *= 1.1
-                self.normal_threshold *= 1.1
-                
-            elif action == 'decrease_sens':
-                # Decrease sensitivity by raising thresholds
-                self.suspicious_threshold *= 0.9
-                self.normal_threshold *= 0.9
-                
-            elif action == 'retrain':
-                # Retrain base model with recent data
-                if len(self.data_buffer) > 10:
-                    recent_data = np.array(self.data_buffer[-100:])  # Last 100 samples
-                    self.base_model.fit(recent_data)
-                    
-                    # Update thresholds
-                    scores = self.base_model.decision_function(recent_data)
-                    self.normal_threshold = np.percentile(scores, 10)
-                    self.suspicious_threshold = np.percentile(scores, 5)
-            
-            # 'keep' action does nothing
-            
-        except Exception as e:
-            logger.warning(f"Action execution failed: {str(e)}")
-    
-    def predict_online(self, data):
-        """Make predictions with online model"""
-        try:
-            if self.model is None:
-                return None
-            
-            numeric_data = data.select_dtypes(include=['number'])
-            if numeric_data.empty:
-                return None
-            
-            X = numeric_data.values
-            
-            if self.model_type == "incremental_isolation_forest":
-                all_predictions = []
-                all_scores = []
-                
-                for name, model in self.model.items():
-                    try:
-                        if name == 'sgd_ocsvm':
-                            pred = model.predict(X)
-                            scores = model.decision_function(X) if hasattr(model, 'decision_function') else pred
-                            all_predictions.append(pred == -1)  # Convert to anomaly boolean
-                            all_scores.append(scores)
-                            
-                        elif hasattr(model, 'predict'):
-                            pred = model.predict(X)
-                            all_predictions.append(pred == 1)  # Assuming 1 is anomaly
-                            all_scores.append(pred.astype(float))
-                            
-                    except Exception as e:
-                        logger.warning(f"Prediction failed for {name}: {str(e)}")
-                        continue
-                
-                if all_predictions:
-                    # Ensemble prediction
-                    ensemble_pred = np.mean(all_predictions, axis=0) > 0.5
-                    ensemble_scores = np.mean(all_scores, axis=0) if all_scores else np.ones(len(ensemble_pred)) * 0.5
-                    confidence = 1.0 - np.std(all_predictions, axis=0)
-                    
-                    return {
-                        'anomalies': ensemble_pred,
-                        'scores': ensemble_scores,
-                        'confidence': confidence,
-                        'method': 'incremental_ensemble'
-                    }
-                    
-            elif self.model_type == "river_anomaly" and RIVER_AVAILABLE:
-                anomalies = []
-                scores = []
-                
-                # Use adaptive threshold based on score distribution
-                # River scores are typically negative for normal, positive for anomalies
-                # But threshold should be based on percentiles, not fixed value
-                all_scores_temp = []
-                for _, row in numeric_data.iterrows():
-                    x = {str(i): float(val) for i, val in enumerate(row)}
-                    score = self.model.score_one(x)
-                    all_scores_temp.append(score)
-                
-                # Calculate threshold based on 95th percentile (more conservative)
-                if len(all_scores_temp) > 0:
-                    score_array = np.array(all_scores_temp)
-                    threshold = np.percentile(score_array, 95)  # Top 5% are anomalies
-                    
-                    # Re-score with proper threshold
-                    for score in all_scores_temp:
-                        anomalies.append(score > threshold)
-                        scores.append(score)
-                else:
-                    # Fallback to fixed threshold only if no scores
-                    threshold = 0.5
-                    for score in all_scores_temp:
-                        anomalies.append(score > threshold)
-                        scores.append(score)
-                
-                return {
-                    'anomalies': np.array(anomalies),
-                    'scores': np.array(scores),
-                    'confidence': np.abs(np.array(scores) - threshold) / (np.abs(threshold) + 1e-8),  # Distance from adaptive threshold
-                    'method': 'river_online',
-                    'threshold_used': threshold
-                }
-                
-            elif self.model_type == "reinforcement_learning":
-                if self.base_model is None:
-                    return None
-                
-                scores = self.base_model.decision_function(X)
-                # For Isolation Forest, negative scores indicate anomalies
-                # Use percentile-based threshold instead of fixed threshold to avoid too many false positives
-                if not hasattr(self, 'normal_threshold') or self.normal_threshold is None:
-                    # Calculate threshold from current scores if not set
-                    threshold = np.percentile(scores, 5)  # Bottom 5% are anomalies
-                else:
-                    threshold = self.normal_threshold
-                
-                predictions = scores < threshold  # Below threshold = anomaly
-                confidence = np.abs(scores - threshold) / (np.abs(threshold) + 1e-8)
-                
-                return {
-                    'anomalies': predictions,
-                    'scores': scores,
-                    'confidence': confidence,
-                    'method': 'reinforcement_learning',
-                    'current_thresholds': {
-                        'normal': self.normal_threshold,
-                        'suspicious': self.suspicious_threshold
-                    }
-                }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Online prediction failed: {str(e)}")
-            return None
-    
-    def _check_concept_drift(self):
-        """Check for concept drift and adapt accordingly"""
-        try:
-            if len(self.data_buffer) < 100:  # Need enough data
-                return
-            
-            # Simple concept drift detection based on performance degradation
-            recent_data = np.array(self.data_buffer[-50:])  # Last 50 samples
-            older_data = np.array(self.data_buffer[-100:-50])  # Previous 50 samples
-            
-            if self.model_type == "reinforcement_learning" and self.base_model is not None:
-                # Compare score distributions
-                recent_scores = self.base_model.decision_function(recent_data)
-                older_scores = self.base_model.decision_function(older_data)
-                
-                # Statistical test for distribution difference (simplified)
-                from scipy.stats import ks_2samp
-                statistic, p_value = ks_2samp(recent_scores, older_scores)
-                
-                if p_value < 0.01:  # Significant difference detected
-                    logger.info(f"Concept drift detected! P-value: {p_value:.6f}")
-                    
-                    # Trigger adaptation
-                    if self.model_type == "reinforcement_learning":
-                        # Increase exploration rate temporarily
-                        self.epsilon = min(0.3, self.epsilon * 1.5)
-                        
-                        # Retrain base model
-                        self.base_model.fit(recent_data)
-                        
-                        # Update thresholds
-                        scores = self.base_model.decision_function(recent_data)
-                        self.normal_threshold = np.percentile(scores, 10)
-                        self.suspicious_threshold = np.percentile(scores, 5)
-            
-        except Exception as e:
-            logger.warning(f"Concept drift detection failed: {str(e)}")
-    
-    def get_learning_statistics(self):
-        """Get statistics about the online learning process"""
-        try:
-            stats = {
-                'model_type': self.model_type,
-                'data_buffer_size': len(self.data_buffer),
-                'feedback_history_size': len(self.feedback_history),
-                'learning_rate': self.learning_rate,
-                'window_size': self.window_size
-            }
-            
-            if self.model_type == "reinforcement_learning":
-                stats.update({
-                    'epsilon': self.epsilon,
-                    'q_table_size': len(self.q_table),
-                    'average_reward': np.mean(self.reward_history) if self.reward_history else 0.0,
-                    'recent_states': self.state_history[-10:] if self.state_history else [],
-                    'recent_actions': self.action_history[-10:] if self.action_history else [],
-                    'current_thresholds': {
-                        'normal': getattr(self, 'normal_threshold', None),
-                        'suspicious': getattr(self, 'suspicious_threshold', None)
-                    }
-                })
-            
-            return stats
-            
-        except Exception as e:
-            logger.error(f"Failed to get learning statistics: {str(e)}")
-            return {'error': str(e)}
-    
-    def save(self, filepath):
-        """Save online learning model to file"""
-        try:
-            # Ensure filepath has .pkl extension
-            if not filepath.endswith('.pkl'):
-                filepath = filepath + '.pkl'
-                
-            # Create directory if needed
-            directory = os.path.dirname(filepath)
-            if directory and not os.path.exists(directory):
-                os.makedirs(directory, exist_ok=True)
-            
-            # Prepare online model data
-            model_data = {
-                "model_type": self.model_type,
-                "learning_rate": self.learning_rate,
-                "model": self.model,
-                "scaler": getattr(self, 'scaler', None),
-                "online_scaler": getattr(self, 'online_scaler', None),
-                "feature_columns": getattr(self, 'feature_columns', None),
-                "window_size": self.window_size,
-                "data_buffer": self.data_buffer,
-                "anomaly_buffer": self.anomaly_buffer,
-                "performance_metrics": self.performance_metrics,
-                "adaptation_threshold": self.adaptation_threshold,
-                "feedback_history": self.feedback_history,
-                "reward_history": self.reward_history,
-                "state_history": self.state_history,
-                "action_history": self.action_history,
-                "q_table": self.q_table,
-                "epsilon": self.epsilon,
-                "gamma": self.gamma,
-                "alpha": self.alpha,
-                "model_performance": self.model_performance
-            }
-            
-            # Add RL-specific attributes if they exist
-            if hasattr(self, 'base_model'):
-                model_data["base_model"] = self.base_model
-            if hasattr(self, 'normal_threshold'):
-                model_data["normal_threshold"] = self.normal_threshold
-            if hasattr(self, 'suspicious_threshold'):
-                model_data["suspicious_threshold"] = self.suspicious_threshold
-            if hasattr(self, 'states'):
-                model_data["states"] = self.states
-            if hasattr(self, 'actions'):
-                model_data["actions"] = self.actions
-            
-            with open(filepath, 'wb') as f:
-                pickle.dump(model_data, f)
-                
-            return True, f"Online learning model saved to {filepath}"
-            
-        except Exception as e:
-            logger.error(f"Online model save error: {str(e)}")
-            return False, f"Error saving online model: {str(e)}"
-    
-    @staticmethod
-    def load(filepath):
-        """Load online learning model from file"""
-        try:
-            # Check if file exists
-            if not os.path.exists(filepath):
-                return None, f"Model file not found: {filepath}"
-                
-            model_data = safe_pickle_load(filepath)
-            
-            if not isinstance(model_data, dict) or "model_type" not in model_data:
-                return None, "Invalid online model file format"
-            
-            # Create online model instance
-            online_model = OnlineLearningAnomalyDetector(
-                model_type=model_data["model_type"],
-                learning_rate=model_data.get("learning_rate", 0.01)
-            )
-            
-            # Load all attributes
-            online_model.model = model_data.get("model")
-            online_model.scaler = model_data.get("scaler")
-            online_model.online_scaler = model_data.get("online_scaler")
-            online_model.feature_columns = model_data.get("feature_columns")
-            online_model.window_size = model_data.get("window_size", 1000)
-            online_model.data_buffer = model_data.get("data_buffer", [])
-            online_model.anomaly_buffer = model_data.get("anomaly_buffer", [])
-            online_model.performance_metrics = model_data.get("performance_metrics", {})
-            online_model.adaptation_threshold = model_data.get("adaptation_threshold", 0.1)
-            online_model.feedback_history = model_data.get("feedback_history", [])
-            online_model.reward_history = model_data.get("reward_history", [])
-            online_model.state_history = model_data.get("state_history", [])
-            online_model.action_history = model_data.get("action_history", [])
-            online_model.q_table = model_data.get("q_table", {})
-            online_model.epsilon = model_data.get("epsilon", 0.1)
-            online_model.gamma = model_data.get("gamma", 0.9)
-            online_model.alpha = model_data.get("alpha", 0.1)
-            online_model.model_performance = model_data.get("model_performance", [])
-            
-            # Load RL-specific attributes if they exist
-            if "base_model" in model_data:
-                online_model.base_model = model_data["base_model"]
-            if "normal_threshold" in model_data:
-                online_model.normal_threshold = model_data["normal_threshold"]
-            if "suspicious_threshold" in model_data:
-                online_model.suspicious_threshold = model_data["suspicious_threshold"]
-            if "states" in model_data:
-                online_model.states = model_data["states"]
-            if "actions" in model_data:
-                online_model.actions = model_data["actions"]
-            
-            return online_model, f"Online learning model loaded successfully from {filepath}"
-            
-        except Exception as e:
-            logger.error(f"Online model load error: {str(e)}")
-            return None, f"Error loading online model: {str(e)}"
-
-class AnomalyDetectionModel:
-    def __init__(self, model_type="isolation_forest"):
-        self.model_type = model_type
-        self.model = None
-        self.scaler = None
-        self.feature_columns = None
-        self.sequence_length = 10   # For sequence-based models like LSTM
-        self.reconstruction_error_threshold = None  # For autoencoders
-        self.history = None  # To store training history for deep learning models
-        self.metrics = {}  # Store model evaluation metrics
-        self.X_train = None  # Store training data for metrics calculation
-        
-    def evaluate_model(self, true_labels=None, predictions=None):
-        """Calculate model evaluation metrics"""
-        try:
-            if true_labels is None or predictions is None:
-                # For unsupervised models, use internal metrics
-                if hasattr(self.model, 'score_samples'):
-                    scores = self.model.score_samples(self.X_train)
-                    self.metrics['avg_anomaly_score'] = float(np.mean(scores))
-                    self.metrics['std_anomaly_score'] = float(np.std(scores))
-                if hasattr(self.model, 'decision_function'):
-                    scores = self.model.decision_function(self.X_train)
-                    self.metrics['avg_decision_score'] = float(np.mean(scores))
-                    self.metrics['decision_threshold'] = float(np.percentile(scores, 90))
-            else:
-                # Calculate supervised metrics if we have true labels
-                from sklearn.metrics import precision_score, recall_score, f1_score
-                self.metrics['precision'] = float(precision_score(true_labels, predictions))
-                self.metrics['recall'] = float(recall_score(true_labels, predictions))
-                self.metrics['f1_score'] = float(f1_score(true_labels, predictions))
-            
-            # Add timestamp
-            self.metrics['evaluation_time'] = datetime.datetime.now().isoformat()
-            return self.metrics
-            
-        except Exception as e:
-            logger.error(f"Error calculating model metrics: {str(e)}")
-            return {}
-
-    def _build_feature_frame(self, data, fit=False):
-        """Build a numeric feature frame from mixed-type telemetry data."""
-        if not isinstance(data, pd.DataFrame):
-            return pd.DataFrame()
-
-        feature_data = data.copy()
-
-        # Convert explicit datetime-like columns into numeric time features.
-        datetime_name_hints = {"time", "timestamp", "datetime", "date", "ds"}
-        datetime_cols = [
-            col for col in feature_data.columns
-            if pd.api.types.is_datetime64_any_dtype(feature_data[col]) or str(col).strip().lower() in datetime_name_hints
-        ]
-        for col in datetime_cols:
-            parsed = pd.to_datetime(feature_data[col], errors="coerce")
-            if parsed.notna().any():
-                feature_data[f"{col}__hour"] = parsed.dt.hour.fillna(0).astype(float)
-                feature_data[f"{col}__dayofweek"] = parsed.dt.dayofweek.fillna(0).astype(float)
-                feature_data[f"{col}__day"] = parsed.dt.day.fillna(0).astype(float)
-                feature_data[f"{col}__month"] = parsed.dt.month.fillna(0).astype(float)
-                min_ts = parsed.min()
-                if pd.notna(min_ts):
-                    feature_data[f"{col}__elapsed_sec"] = ((parsed - min_ts).dt.total_seconds()).fillna(0.0)
-            feature_data = feature_data.drop(columns=[col], errors="ignore")
-
-        # Handle booleans and categoricals.
-        bool_cols = feature_data.select_dtypes(include=["bool"]).columns
-        for col in bool_cols:
-            feature_data[col] = feature_data[col].astype(int)
-
-        categorical_cols = feature_data.select_dtypes(include=["object", "category"]).columns
-        if len(categorical_cols) > 0:
-            feature_data = pd.get_dummies(
-                feature_data,
-                columns=list(categorical_cols),
-                dummy_na=True,
-                dtype=float,
-            )
-
-        feature_data = feature_data.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-        if fit:
-            self.feature_columns = list(feature_data.columns)
-            return feature_data
-
-        if self.feature_columns:
-            for missing_col in self.feature_columns:
-                if missing_col not in feature_data.columns:
-                    feature_data[missing_col] = 0.0
-            feature_data = feature_data.drop(columns=[c for c in feature_data.columns if c not in self.feature_columns], errors="ignore")
-            feature_data = feature_data[self.feature_columns]
-
-        return feature_data
-
-    def _prepare_prediction_features(self, data):
-        """Prepare prediction features aligned to the training schema."""
-        if not isinstance(data, pd.DataFrame):
-            return None, "Prediction data must be a pandas DataFrame"
-
-        if self.feature_columns is not None:
-            pred_data = self._build_feature_frame(data, fit=False)
-            if pred_data.empty:
-                return None, "None of the required feature columns found in data"
-            return pred_data, None
-
-        pred_data = data.select_dtypes(include=[np.number])
-        if pred_data.empty:
-            return None, "No numeric columns found in prediction data"
-        return pred_data, None
-
-    def _runtime_model_type(self):
-        """Return executable runtime model type for the current model key."""
-        requested = getattr(self, "model_type", "isolation_forest")
-        resolved = resolve_runtime_model_type(requested)
-        # If Prophet backend is unavailable, use robust statistical fallback.
-        if resolved == "prophet" and not PROPHET_AVAILABLE:
-            return "z-score"
-        return resolved
-
-    def train(self, data, **kwargs):
-        """Train the anomaly detection model"""
-        try:
-            # Ensure we're using numeric data for training
-            if not isinstance(data, pd.DataFrame):
-                return False, "Training data must be a pandas DataFrame"
-
-            active_model_type = self._runtime_model_type()
-            self.resolved_model_type = active_model_type
-            if active_model_type != self.model_type:
-                logger.info(
-                    f"Model alias resolution: requested '{self.model_type}' -> runtime backend '{active_model_type}'"
-                )
-
-            numeric_data = data.select_dtypes(include=['number'])
-            engineered_model_types = {
-                "isolation_forest", "lof", "ocsvm", "random_forest",
-                "autoencoder", "lstm", "gru", "xgboost"
-            }
-            if active_model_type in engineered_model_types:
-                training_features = self._build_feature_frame(data, fit=True)
-                if training_features.empty:
-                    return False, "No valid features found in the training data"
-                if len(numeric_data.columns) < len(data.columns):
-                    engineered_from = sorted(set(data.columns) - set(numeric_data.columns))
-                    logger.info(f"Applied feature engineering for non-numeric columns: {engineered_from}")
-            else:
-                training_features = numeric_data
-                if training_features.empty:
-                    return False, "No numeric columns found in the training data"
-                self.feature_columns = list(training_features.columns)
-                if len(numeric_data.columns) < len(data.columns):
-                    excluded_cols = set(data.columns) - set(numeric_data.columns)
-                    logger.warning(f"Non-numeric columns excluded from model training: {excluded_cols}")
-
-            feature_count = len(training_features.columns)
-            n_rows = len(training_features)
-            logger.info(
-                f"Training pipeline: model={active_model_type}, shape={n_rows:,} rows × {feature_count} features "
-                f"(large datasets may take minutes without further messages until the next step completes)"
-            )
-
-            # Data preparation
-            t_scale = time.perf_counter()
-            logger.info(f"StandardScaler fit_transform starting ({n_rows:,} × {feature_count})…")
-            self.scaler = StandardScaler()
-            X = self.scaler.fit_transform(training_features)
-            logger.info(
-                f"StandardScaler finished in {time.perf_counter() - t_scale:.2f}s (output shape {X.shape})"
-            )
-            
-            # Traditional ML models
-            if active_model_type == "isolation_forest":
-                n_estimators = kwargs.get('n_estimators', 100)
-                contamination = kwargs.get('contamination', 0.1)
-                self.model = IsolationForest(
-                    n_estimators=n_estimators,
-                    contamination=contamination,
-                    random_state=42
-                )
-                logger.info(
-                    f"Fitting IsolationForest (n_estimators={n_estimators}, rows={n_rows:,})…"
-                )
-                t_fit = time.perf_counter()
-                self.model.fit(X)
-                logger.info(f"IsolationForest fit finished in {time.perf_counter() - t_fit:.2f}s")
-                return True, f"Isolation Forest model trained successfully with {feature_count} features"
-                
-            elif active_model_type == "lof":
-                n_neighbors = kwargs.get('n_neighbors', 20)
-                contamination = kwargs.get('contamination', 0.1)
-                self.model = LocalOutlierFactor(
-                    n_neighbors=n_neighbors,
-                    contamination=contamination,
-                    novelty=True
-                )
-                logger.info(
-                    f"Fitting LocalOutlierFactor (n_neighbors={n_neighbors}, rows={n_rows:,})…"
-                )
-                t_fit = time.perf_counter()
-                self.model.fit(X)
-                logger.info(f"LocalOutlierFactor fit finished in {time.perf_counter() - t_fit:.2f}s")
-                return True, f"LOF model trained successfully with {feature_count} features"
-            
-            elif active_model_type == "ocsvm":
-                nu = kwargs.get('nu', 0.05)
-                kernel = kwargs.get('kernel', 'rbf')
-                gamma = kwargs.get('gamma', 'scale')
-                self.model = OneClassSVM(nu=nu, kernel=kernel, gamma=gamma)
-                logger.info(
-                    f"Fitting OneClassSVM (nu={nu}, kernel={kernel}, rows={n_rows:,}) — often slow on large n…"
-                )
-                t_fit = time.perf_counter()
-                self.model.fit(X)
-                logger.info(f"OneClassSVM fit finished in {time.perf_counter() - t_fit:.2f}s")
-                return True, f"One-Class SVM trained successfully with {feature_count} features"
-
-            elif active_model_type == "random_forest":
-                n_estimators = kwargs.get('n_estimators', 200)
-                max_depth = kwargs.get('max_depth', None)
-                contamination = kwargs.get('contamination', 0.1)
-
-                # Build pseudo-labels from IsolationForest to enable RF training.
-                logger.info(
-                    f"Random Forest: pseudo-labels via IsolationForest (rows={n_rows:,})…"
-                )
-                t_iso = time.perf_counter()
-                iso_forest = IsolationForest(contamination=contamination, random_state=42)
-                initial_labels = iso_forest.fit_predict(X)
-                logger.info(
-                    f"Random Forest: IsolationForest pre-step done in {time.perf_counter() - t_iso:.2f}s"
-                )
-                y_train = np.where(initial_labels == -1, 1, 0)
-
-                self.model = RandomForestClassifier(
-                    n_estimators=n_estimators,
-                    max_depth=max_depth,
-                    random_state=42,
-                    class_weight='balanced_subsample'
-                )
-                logger.info(
-                    f"Fitting RandomForestClassifier (n_estimators={n_estimators}, rows={n_rows:,})…"
-                )
-                t_fit = time.perf_counter()
-                self.model.fit(X, y_train)
-                logger.info(f"RandomForest fit finished in {time.perf_counter() - t_fit:.2f}s")
-                self.contamination = contamination
-                return True, f"Random Forest model trained successfully with {feature_count} features"
-
-            # Deep learning models - require TensorFlow
-            elif active_model_type in ["autoencoder", "lstm", "gru"] and TENSORFLOW_AVAILABLE:
-                # Deep learning params
-                epochs = kwargs.get('epochs', 50)
-                batch_size = kwargs.get('batch_size', 32)
-                validation_split = kwargs.get('validation_split', 0.2)
-                patience = kwargs.get('patience', 5)
-                learning_rate = kwargs.get('learning_rate', 0.001)
-                
-                # Set up early stopping
-                early_stopping = EarlyStopping(
-                    monitor='val_loss',
-                    patience=patience,
-                    restore_best_weights=True
-                )
-
-                if active_model_type == "autoencoder":
-                    # Create an autoencoder for anomaly detection
-                    input_dim = X.shape[1]
-                    encoding_dim = max(1, input_dim // 2)  # Size of the encoded representation
-                    
-                    # Build encoder
-                    input_layer = Input(shape=(input_dim,))
-                    encoder = Dense(encoding_dim, activation='relu')(input_layer)
-                    
-                    # Build decoder
-                    decoder = Dense(input_dim, activation='sigmoid')(encoder)
-                    
-                    # Set up the autoencoder
-                    self.model = Model(inputs=input_layer, outputs=decoder)
-                    self.model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse')
-                    
-                    # Train the model
-                    logger.info(
-                        f"Autoencoder: Keras fit starting (samples={X.shape[0]:,}, epochs≤{epochs}, batch={batch_size})…"
-                    )
-                    self.history = self.model.fit(
-                        X, X,  # Autoencoder tries to reconstruct the input
-                        epochs=epochs,
-                        batch_size=batch_size,
-                        validation_split=validation_split,
-                        callbacks=[early_stopping],
-                        verbose=1
-                    )
-                    
-                    # Calculate reconstruction error threshold
-                    logger.info(
-                        f"Autoencoder: computing reconstruction MSE on full training set ({X.shape[0]:,} rows) for threshold…"
-                    )
-                    t_rec = time.perf_counter()
-                    reconstructions = self.model.predict(X)
-                    logger.info(
-                        f"Autoencoder: reconstruction pass done in {time.perf_counter() - t_rec:.2f}s"
-                    )
-                    mse = np.mean(np.power(X - reconstructions, 2), axis=1)
-                    # Set threshold as the 95th percentile of reconstruction errors
-                    self.reconstruction_error_threshold = np.percentile(mse, 95)
-                    
-                    return True, f"Autoencoder model trained successfully with {feature_count} features"
-                    
-                elif active_model_type in ["lstm", "gru"]:
-                    # Check if we have timestamp column for sequence data
-                    timestamp_col = kwargs.get('timestamp_column', None)
-                    self.sequence_length = kwargs.get('sequence_length', 10)
-                    
-                    # Create sequences for training
-                    sequences = self._create_sequences(X, self.sequence_length)
-                    if len(sequences) == 0:
-                        return False, f"Not enough data to create sequences with length {self.sequence_length}"
-                    model_name = "LSTM" if active_model_type == "lstm" else "GRU"
-                    
-                    # Define model input shape
-                    input_shape = (self.sequence_length, X.shape[1])
-                    
-                    # Build the model
-                    self.model = Sequential()
-                    
-                    if active_model_type == "lstm":
-                        # LSTM Autoencoder
-                        self.model.add(LSTM(units=64, input_shape=input_shape, return_sequences=True))
-                        self.model.add(LSTM(units=32, return_sequences=False))
-                        self.model.add(RepeatVector(self.sequence_length))
-                        self.model.add(LSTM(units=32, return_sequences=True))
-                        self.model.add(LSTM(units=64, return_sequences=True))
-                        self.model.add(TimeDistributed(Dense(X.shape[1])))
-                    else:  # GRU
-                        # GRU Autoencoder
-                        self.model.add(GRU(units=64, input_shape=input_shape, return_sequences=True))
-                        self.model.add(GRU(units=32, return_sequences=False))
-                        self.model.add(RepeatVector(self.sequence_length))
-                        self.model.add(GRU(units=32, return_sequences=True))
-                        self.model.add(GRU(units=64, return_sequences=True))
-                        self.model.add(TimeDistributed(Dense(X.shape[1])))
-                    
-                    # Compile model
-                    self.model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse')
-                    
-                    # Train model
-                    logger.info(
-                        f"{model_name}: Keras fit on sequences "
-                        f"(n={len(sequences):,}, seq_len={self.sequence_length})…"
-                    )
-                    self.history = self.model.fit(
-                        sequences, sequences,  # Sequence autoencoder
-                        epochs=epochs,
-                        batch_size=batch_size,
-                        validation_split=validation_split,
-                        callbacks=[early_stopping],
-                        verbose=1
-                    )
-                    
-                    # Calculate reconstruction error threshold
-                    logger.info(f"{model_name}: reconstruction predict for threshold (n={len(sequences):,})…")
-                    t_rec = time.perf_counter()
-                    reconstructions = self.model.predict(sequences)
-                    logger.info(
-                        f"{model_name}: reconstruction pass done in {time.perf_counter() - t_rec:.2f}s"
-                    )
-                    mse = np.mean(np.power(sequences - reconstructions, 2), axis=(1, 2))
-                    # Set threshold as the 95th percentile of reconstruction errors
-                    self.reconstruction_error_threshold = np.percentile(mse, 95)
-                    
-                    return True, f"{model_name} autoencoder model trained successfully"
-            
-            # XGBoost model 
-            elif active_model_type == "xgboost":
-                try:
-                    import xgboost as xgb
-                    
-                    n_estimators = kwargs.get('n_estimators', 100)
-                    max_depth = kwargs.get('max_depth', 6)
-                    learning_rate = kwargs.get('learning_rate', 0.1)
-                    contamination = kwargs.get('contamination', 0.1)
-                    
-                    # XGBoost for anomaly detection using One-Class classification approach
-                    # Create synthetic normal/anomaly labels for training
-                    # Use IsolationForest to generate initial labels for XGBoost training
-                    logger.info(
-                        f"XGBoost: pseudo-labels via IsolationForest (rows={n_rows:,})…"
-                    )
-                    t_iso = time.perf_counter()
-                    iso_forest = IsolationForest(contamination=contamination, random_state=42)
-                    initial_labels = iso_forest.fit_predict(X)
-                    logger.info(
-                        f"XGBoost: IsolationForest pre-step done in {time.perf_counter() - t_iso:.2f}s"
-                    )
-                    # Convert -1/1 to 0/1 (normal/anomaly)
-                    y_train = np.where(initial_labels == -1, 1, 0)
-                    
-                    self.model = xgb.XGBClassifier(
-                        n_estimators=n_estimators,
-                        max_depth=max_depth,
-                        learning_rate=learning_rate,
-                        random_state=42,
-                        eval_metric='logloss'
-                    )
-                    logger.info(
-                        f"Fitting XGBClassifier (n_estimators={n_estimators}, rows={n_rows:,})…"
-                    )
-                    t_fit = time.perf_counter()
-                    self.model.fit(X, y_train)
-                    logger.info(f"XGBoost fit finished in {time.perf_counter() - t_fit:.2f}s")
-                    
-                    # Store contamination for threshold calculation
-                    self.contamination = contamination
-                    
-                    return True, f"XGBoost model trained successfully with {feature_count} features"
-                    
-                except ImportError:
-                    return False, "XGBoost library not installed. Please install with: pip install xgboost"
-                except Exception as e:
-                    return False, f"Error training XGBoost model: {str(e)}"
-            
-            # IQR (Interquartile Range) method
-            elif active_model_type == "iqr_(interquartile_range)":
-                iqr_factor = kwargs.get('iqr_factor', 1.5)
-                logger.info(
-                    f"IQR: computing bounds ({len(numeric_data.columns)} columns, "
-                    f"{len(numeric_data):,} rows) — quantiles can be slow on large data…"
-                )
-                
-                # Calculate IQR bounds for each feature
-                self.iqr_bounds = {}
-                for col in numeric_data.columns:
-                    q1 = numeric_data[col].quantile(0.25)
-                    q3 = numeric_data[col].quantile(0.75)
-                    iqr = q3 - q1
-                    lower_bound = q1 - iqr_factor * iqr
-                    upper_bound = q3 + iqr_factor * iqr
-                    self.iqr_bounds[col] = {'lower': lower_bound, 'upper': upper_bound}
-                
-                # Store the IQR factor for later use
-                self.iqr_factor = iqr_factor
-                
-                # Set model to indicate training is complete
-                self.model = "iqr_trained"
-                
-                return True, f"IQR model trained successfully with factor {iqr_factor}"
-            
-            # Z-Score method
-            elif active_model_type == "z-score":
-                threshold = kwargs.get('threshold', 3.0)
-                logger.info(
-                    f"Z-Score: computing per-column mean/std ({len(numeric_data.columns)} columns, "
-                    f"{len(numeric_data):,} rows)…"
-                )
-                
-                # Calculate mean and std for each feature
-                self.z_stats = {}
-                for col in numeric_data.columns:
-                    self.z_stats[col] = {
-                        'mean': numeric_data[col].mean(),
-                        'std': numeric_data[col].std()
-                    }
-                
-                # Store the threshold
-                self.z_threshold = threshold
-                
-                # Set model to indicate training is complete
-                self.model = "zscore_trained"
-                
-                return True, f"Z-Score model trained successfully with threshold {threshold}"
-            
-            # Prophet model for time series
-            elif active_model_type == "prophet" and PROPHET_AVAILABLE:
-                # Prophet requires a specific data format: ds (dates) and y (values)
-                timestamp_col = kwargs.get('timestamp_column', None)
-                target_col = kwargs.get('target_column', None)
-                
-                # Try to find timestamp column automatically if not provided
-                if timestamp_col is None:
-                    # Look for common timestamp column names
-                    timestamp_candidates = [col for col in data.columns if col.lower() in ['date', 'time', 'timestamp', 'datetime', 'ds']]
-                    if timestamp_candidates:
-                        timestamp_col = timestamp_candidates[0]
-                        logger.info(f"Prophet: Auto-detected timestamp column: {timestamp_col}")
-                    else:
-                        # Check if index is datetime
-                        if isinstance(data.index, pd.DatetimeIndex):
-                            timestamp_col = 'index'
-                            logger.info("Prophet: Using datetime index as timestamp")
-                        else:
-                            return False, "Prophet requires a timestamp column. No timestamp column found in data."
-                
-                # Try to find target column if not provided
-                if target_col is None:
-                    # Use first numeric column as target
-                    numeric_cols = data.select_dtypes(include=['number']).columns.tolist()
-                    if numeric_cols:
-                        target_col = numeric_cols[0]
-                        logger.info(f"Prophet: Auto-selected target column: {target_col}")
-                    else:
-                        return False, "Prophet requires a target column. No numeric columns found in data."
-                
-                # Validate columns exist
-                if timestamp_col != 'index' and timestamp_col not in data.columns:
-                    return False, f"Prophet: Timestamp column '{timestamp_col}' not found in data"
-                if target_col not in data.columns:
-                    return False, f"Prophet: Target column '{target_col}' not found in data"
-                
-                # Prepare data for Prophet
-                if timestamp_col == 'index':
-                    prophet_data = pd.DataFrame({
-                        'ds': data.index,
-                        'y': data[target_col]
-                    })
-                else:
-                    prophet_data = data[[timestamp_col, target_col]].copy()
-                    prophet_data.columns = ['ds', 'y']  # Prophet requires these column names
-                
-                # Convert to datetime if not already
-                if not pd.api.types.is_datetime64_dtype(prophet_data['ds']):
-                    try:
-                        prophet_data['ds'] = pd.to_datetime(prophet_data['ds'])
-                    except Exception as e:
-                        return False, f"Prophet: Could not convert timestamp column to datetime: {str(e)}"
-                
-                # Drop NaN values
-                prophet_data = prophet_data.dropna()
-                
-                if len(prophet_data) < 2:
-                    return False, "Prophet requires at least 2 data points"
-                
-                # Create and fit Prophet model
-                try:
-                    self.model = Prophet(
-                        yearly_seasonality=kwargs.get('yearly_seasonality', 'auto'),
-                        weekly_seasonality=kwargs.get('weekly_seasonality', 'auto'),
-                        daily_seasonality=kwargs.get('daily_seasonality', 'auto'),
-                        changepoint_prior_scale=kwargs.get('changepoint_prior_scale', 0.05)
-                    )
-                    
-                    logger.info(f"Prophet: fitting on {len(prophet_data):,} rows…")
-                    t_pf = time.perf_counter()
-                    self.model.fit(prophet_data)
-                    logger.info(f"Prophet: fit finished in {time.perf_counter() - t_pf:.2f}s")
-                    
-                    # Store original data and target column for later use
-                    self.prophet_data = prophet_data
-                    self.target_column = target_col
-                    self.timestamp_column = timestamp_col
-                    
-                    return True, f"Prophet model trained successfully on {len(prophet_data)} data points"
-                except Exception as e:
-                    return False, f"Prophet training failed: {str(e)}"
-                
-            else:
-                if active_model_type in ["autoencoder", "lstm", "gru"] and not TENSORFLOW_AVAILABLE:
-                    return False, f"TensorFlow is required for {self.model_type} models but is not installed"
-                if active_model_type == "prophet" and not PROPHET_AVAILABLE:
-                    return False, "Prophet is required but is not installed"
-                    
-                return False, f"Unsupported model type: {self.model_type}"
-                
-        except Exception as e:
-            logger.error(f"Training error: {str(e)}")
-            return False, f"Error training model: {str(e)}"
-    
-    def predict(self, data):
-        """Predict anomalies in new data"""
-        try:
-            if self.model is None:
-                return None, "Model not trained"
-            active_model_type = getattr(self, "resolved_model_type", self._runtime_model_type())
-            
-            # Traditional ML models
-            if active_model_type in ["isolation_forest", "lof", "ocsvm"]:
-                pred_data, prep_error = self._prepare_prediction_features(data)
-                if prep_error:
-                    return None, prep_error
-                    
-                # Transform using the saved scaler
-                X = self.scaler.transform(pred_data)
-                
-                if active_model_type == "isolation_forest":
-                    scores = self.model.decision_function(X)
-                    predictions = self.model.predict(X)  # 1: normal, -1: anomaly
-                elif active_model_type == "lof":
-                    scores = self.model.decision_function(X)
-                    predictions = self.model.predict(X)
-                else:  # ocsvm
-                    scores = self.model.decision_function(X)
-                    predictions = self.model.predict(X)
-                    
-                # Convert to consistent format: True for anomaly, False for normal
-                anomalies = (predictions == -1)
-                return scores, anomalies
-                
-            # Deep Learning Models
-            elif active_model_type == "autoencoder" and TENSORFLOW_AVAILABLE:
-                pred_data, prep_error = self._prepare_prediction_features(data)
-                if prep_error:
-                    return None, prep_error
-                
-                # Scale the data
-                X = self.scaler.transform(pred_data)
-                
-                # Get reconstructions
-                reconstructions = self.model.predict(X)
-                
-                # Calculate MSE (anomaly score)
-                mse = np.mean(np.power(X - reconstructions, 2), axis=1)
-                
-                # Determine anomalies using the training-calibrated threshold only.
-                threshold = self.reconstruction_error_threshold
-                if threshold is None:
-                    return None, "Model threshold not calibrated. Retrain the model before prediction."
-                anomalies = mse > threshold
-                
-                return mse, anomalies
-                
-            # Sequence models (LSTM, GRU)
-            elif active_model_type in ["lstm", "gru"] and TENSORFLOW_AVAILABLE:
-                pred_data, prep_error = self._prepare_prediction_features(data)
-                if prep_error:
-                    return None, prep_error
-                
-                # Scale the data
-                X = self.scaler.transform(pred_data)
-                
-                # Create sequences
-                sequences = self._create_sequences(X, self.sequence_length)
-                if len(sequences) == 0:
-                    return None, f"Not enough data to create sequences with length {self.sequence_length}"
-                
-                # Get reconstructions
-                reconstructions = self.model.predict(sequences)
-                
-                # Calculate MSE (anomaly score)
-                mse = np.mean(np.power(sequences - reconstructions, 2), axis=(1, 2))
-                
-                # Pad the scores to match original data length
-                pad_size = len(X) - len(mse)
-                scores = np.pad(mse, (pad_size, 0), 'constant', constant_values=np.nan)
-                
-                # Determine anomalies using the training-calibrated threshold only.
-                threshold = self.reconstruction_error_threshold
-                if threshold is None:
-                    return None, "Model threshold not calibrated. Retrain the model before prediction."
-                sequence_anomalies = mse > threshold
-                
-                # Pad the anomalies to match original data length
-                anomalies = np.pad(sequence_anomalies, (pad_size, 0), 'constant', constant_values=False)
-                
-                return scores, anomalies
-                
-            # XGBoost model
-            elif active_model_type in ["xgboost", "random_forest"]:
-                pred_data, prep_error = self._prepare_prediction_features(data)
-                if prep_error:
-                    return None, prep_error
-                
-                # Scale the data
-                X = self.scaler.transform(pred_data)
-                
-                # Get probability predictions
-                proba = self.model.predict_proba(X)
-                
-                # Use the probability of being anomaly as the anomaly score
-                scores = proba[:, 1] if proba.shape[1] > 1 else proba[:, 0]
-                
-                # Determine anomalies using contamination threshold
-                contamination = float(getattr(self, "contamination", 0.1))
-                threshold = np.percentile(scores, (1 - contamination) * 100)
-                anomalies = scores > threshold
-                
-                return scores, anomalies
-            
-            # IQR (Interquartile Range) method
-            elif active_model_type == "iqr_(interquartile_range)":
-                # Check if model is trained
-                if not hasattr(self, 'iqr_bounds') or not self.iqr_bounds:
-                    logger.error("IQR model not trained - iqr_bounds not found")
-                    return None, None
-                
-                # Prepare data
-                if self.feature_columns is not None:
-                    available_cols = [col for col in self.feature_columns if col in data.columns]
-                    if not available_cols:
-                        logger.error("None of the required feature columns found in data")
-                        return None, None
-                    pred_data = data[available_cols]
-                else:
-                    pred_data = data.select_dtypes(include=['number'])
-                
-                if pred_data.empty or len(pred_data.columns) == 0:
-                    logger.error("No numeric columns found for IQR prediction")
-                    return None, None
-                
-                # Calculate anomaly scores and detect anomalies
-                anomaly_count = np.zeros(len(pred_data))
-                scores = np.zeros(len(pred_data))
-                
-                for col in pred_data.columns:
-                    if col in self.iqr_bounds:
-                        bounds = self.iqr_bounds[col]
-                        # Count violations for each data point
-                        violations = ((pred_data[col] < bounds['lower']) | 
-                                    (pred_data[col] > bounds['upper']))
-                        anomaly_count += violations.astype(int)
-                        
-                        # Calculate distance from bounds as score
-                        lower_dist = np.maximum(0, bounds['lower'] - pred_data[col])
-                        upper_dist = np.maximum(0, pred_data[col] - bounds['upper'])
-                        col_score = lower_dist + upper_dist
-                        scores += col_score
-                
-                # Normalize scores by number of features
-                if len(pred_data.columns) > 0:
-                    scores = scores / len(pred_data.columns)
-                
-                # Mark as anomaly if more than 25% of features are outside bounds
-                # This prevents flagging everything when you have many features
-                anomaly_threshold = max(1, len(pred_data.columns) * 0.25)
-                anomalies = anomaly_count >= anomaly_threshold
-                
-                logger.info(f"IQR: {len(pred_data.columns)} features, threshold={anomaly_threshold:.1f}, anomalies={np.sum(anomalies)}/{len(anomalies)}")
-                
-                return scores, anomalies
-            
-            # Z-Score method
-            elif active_model_type == "z-score":
-                # Check if model is trained
-                if not hasattr(self, 'z_stats') or not self.z_stats:
-                    logger.error("Z-Score model not trained - z_stats not found")
-                    return None, None
-                
-                if not hasattr(self, 'z_threshold'):
-                    logger.error("Z-Score model not trained - z_threshold not found")
-                    return None, None
-                
-                # Prepare data
-                if self.feature_columns is not None:
-                    available_cols = [col for col in self.feature_columns if col in data.columns]
-                    if not available_cols:
-                        logger.error("None of the required feature columns found in data")
-                        return None, None
-                    pred_data = data[available_cols]
-                else:
-                    pred_data = data.select_dtypes(include=['number'])
-                
-                if pred_data.empty or len(pred_data.columns) == 0:
-                    logger.error("No numeric columns found for Z-Score prediction")
-                    return None, None
-                
-                # Calculate Z-scores
-                z_scores = np.zeros((len(pred_data), len(pred_data.columns)))
-                anomaly_feature_count = np.zeros(len(pred_data))
-                
-                for i, col in enumerate(pred_data.columns):
-                    if col in self.z_stats:
-                        stats = self.z_stats[col]
-                        if stats['std'] > 0:  # Avoid division by zero
-                            z_scores[:, i] = np.abs((pred_data[col] - stats['mean']) / stats['std'])
-                            # Count features that exceed threshold
-                            anomaly_feature_count += (z_scores[:, i] > self.z_threshold).astype(int)
-                        else:
-                            z_scores[:, i] = 0
-                
-                # Use maximum Z-score across features as the anomaly score
-                scores = np.max(z_scores, axis=1)
-                
-                # Mark as anomaly if more than 25% of features exceed threshold
-                # This prevents flagging everything when you have many features
-                anomaly_threshold = max(1, len(pred_data.columns) * 0.25)
-                anomalies = anomaly_feature_count >= anomaly_threshold
-                
-                logger.info(f"Z-Score: {len(pred_data.columns)} features, threshold={anomaly_threshold:.1f}, anomalies={np.sum(anomalies)}/{len(anomalies)}")
-                
-                return scores, anomalies
-                
-            # Prophet model
-            elif active_model_type == "prophet" and PROPHET_AVAILABLE:
-                # Identify the timestamp column
-                timestamp_col = next((col for col in data.columns if col.lower() in ['date', 'time', 'timestamp']), None)
-                if timestamp_col is None:
-                    return None, "No timestamp column found for Prophet prediction"
-                
-                # Check if target column exists
-                if self.target_column not in data.columns:
-                    return None, f"Target column '{self.target_column}' not found in data"
-                
-                # Prepare data for Prophet
-                prophet_data = data[[timestamp_col, self.target_column]].copy()
-                prophet_data.columns = ['ds', 'y']
-                
-                # Convert to datetime if not already
-                if not pd.api.types.is_datetime64_dtype(prophet_data['ds']):
-                    prophet_data['ds'] = pd.to_datetime(prophet_data['ds'])
-                
-                # Make prediction using Prophet model
-                forecast = self.model.predict(prophet_data)
-                
-                # Calculate residuals (prediction error)
-                residuals = prophet_data['y'].values - forecast['yhat'].values[:len(prophet_data)]
-                
-                # Use median absolute deviation to identify outliers (anomalies)
-                mad = np.median(np.abs(residuals - np.median(residuals)))
-                threshold = 3 * 1.4826 * mad  # 3 sigma equivalent for MAD
-                
-                # Identify anomalies
-                scores = np.abs(residuals)
-                anomalies = scores > threshold
-                
-                return scores, anomalies
-                
-            else:
-                return None, f"Prediction not implemented for model type: {self.model_type}"
-                
-        except Exception as e:
-            logger.error(f"Prediction error: {str(e)}")
-            return None, f"Error during prediction: {str(e)}"
-    
-    def save(self, filepath):
-        """Save model to file"""
-        if self.model is None:
-            return False, "No model to save"
-            
-        try:
-            active_model_type = getattr(self, "resolved_model_type", self._runtime_model_type())
-            # Ensure filepath has .pkl extension
-            if not filepath.endswith('.pkl'):
-                filepath = filepath + '.pkl'
-                
-            # Create directory if needed
-            directory = os.path.dirname(filepath)
-            if directory and not os.path.exists(directory):
-                os.makedirs(directory, exist_ok=True)
-            
-            # Special handling for TensorFlow models
-            if active_model_type in ["autoencoder", "lstm", "gru"] and TENSORFLOW_AVAILABLE and hasattr(self.model, 'save'):
-                try:
-                    # Save the model architecture and weights separately
-                    model_dir = filepath.replace('.pkl', '')
-                    os.makedirs(model_dir, exist_ok=True)
-                    
-                    # Save Keras model with proper file extension
-                    keras_model_path = os.path.join(model_dir, 'keras_model.keras')
-                    self.model.save(keras_model_path)
-                    
-                    # Save other attributes to a pickle file
-                    attributes = {
-                        "model_type": self.model_type,
-                        "scaler": self.scaler,
-                        "feature_columns": self.feature_columns,
-                        "sequence_length": getattr(self, 'sequence_length', 10),
-                        "reconstruction_error_threshold": getattr(self, 'reconstruction_error_threshold', None),
-                        "metrics": getattr(self, 'metrics', {}),
-                        "X_train": getattr(self, 'X_train', None)
-                    }
-                    
-                    with open(filepath, 'wb') as f:
-                        pickle.dump(attributes, f)
-                        
-                    return True, f"TensorFlow model saved to {filepath} and {keras_model_path}"
-                    
-                except Exception as e:
-                    logger.error(f"TensorFlow model save error: {str(e)}")
-                    return False, f"Error saving TensorFlow model: {str(e)}"
-                
-            # Special handling for Prophet models
-            elif active_model_type == "prophet" and PROPHET_AVAILABLE:
-                try:
-                    model_data = {
-                        "model_type": self.model_type,
-                        "prophet_model": self.model,
-                        "target_column": getattr(self, 'target_column', None),
-                        "prophet_data": getattr(self, 'prophet_data', None)
-                    }
-                    with open(filepath, 'wb') as f:
-                        pickle.dump(model_data, f)
-                    return True, f"Prophet model saved to {filepath}"
-                    
-                except Exception as e:
-                    logger.error(f"Prophet model save error: {str(e)}")
-                    return False, f"Error saving Prophet model: {str(e)}"
-                
-            # Default handling for all other models (including enhanced models)
-            else:
-                try:
-                    model_data = {
-                        "model_type": self.model_type,
-                        "model": self.model,
-                        "scaler": self.scaler,
-                        "feature_columns": self.feature_columns,
-                        "sequence_length": getattr(self, 'sequence_length', 10),
-                        "reconstruction_error_threshold": getattr(self, 'reconstruction_error_threshold', None),
-                        "metrics": getattr(self, 'metrics', {}),
-                        "X_train": getattr(self, 'X_train', None)
-                    }
-                    
-                    # Add enhanced model specific attributes if they exist
-                    if hasattr(self, 'preprocessing_pipeline'):
-                        model_data["preprocessing_pipeline"] = self.preprocessing_pipeline
-                    if hasattr(self, 'ensemble_models'):
-                        model_data["ensemble_models"] = self.ensemble_models
-                    if hasattr(self, 'adaptive_thresholds'):
-                        model_data["adaptive_thresholds"] = self.adaptive_thresholds
-                    if hasattr(self, 'model_params'):
-                        model_data["model_params"] = self.model_params
-                    
-                    with open(filepath, 'wb') as f:
-                        pickle.dump(model_data, f)
-                    return True, f"Model saved to {filepath}"
-                    
-                except Exception as e:
-                    logger.error(f"Model save error: {str(e)}")
-                    return False, f"Error saving model: {str(e)}"
-                
-        except Exception as e:
-            logger.error(f"Model save error: {str(e)}")
-            return False, f"Error saving model: {str(e)}"
-    
-    @staticmethod
-    def load(filepath):
-        """Load model from file"""
-        try:
-            # Check if file exists
-            if not os.path.exists(filepath):
-                return None, f"Model file not found: {filepath}"
-                
-            # Check if it's a TensorFlow model by looking for keras_model.keras in the same directory
-            model_dir = filepath.replace('.pkl', '')
-            keras_model_path = os.path.join(model_dir, 'keras_model.keras')
-            is_tensorflow_model = os.path.exists(keras_model_path) and TENSORFLOW_AVAILABLE
-            
-            # Standard pickle loading first
-            try:
-                with open(filepath, 'rb') as f:
-                    model_data = safe_pickle_load(filepath)
-            except Exception as e:
-                return None, f"Error reading model file: {str(e)}"
-            
-            # Handle TensorFlow models
-            if is_tensorflow_model and isinstance(model_data, dict) and "model_type" in model_data:
-                try:
-                    import tensorflow as tf
-                    
-                    model = AnomalyDetectionModel(model_data["model_type"])
-                    model.resolved_model_type = model._runtime_model_type()
-                    model.scaler = model_data.get("scaler")
-                    model.feature_columns = model_data.get("feature_columns")
-                    model.sequence_length = model_data.get("sequence_length", 10)
-                    model.reconstruction_error_threshold = model_data.get("reconstruction_error_threshold")
-                    
-                    # Load Keras model
-                    model.model = tf.keras.models.load_model(keras_model_path)
-                    
-                    return model, "TensorFlow model loaded successfully"
-                except Exception as e:
-                    logger.error(f"TensorFlow model loading failed: {str(e)}")
-                    return None, f"Error loading TensorFlow model: {str(e)}"
-            
-            # Handle Prophet models
-            if isinstance(model_data, dict) and model_data.get("model_type") == "prophet":
-                if not PROPHET_AVAILABLE:
-                    return None, "Prophet library not available for loading Prophet models"
-                try:
-                    model = AnomalyDetectionModel("prophet")
-                    model.resolved_model_type = model._runtime_model_type()
-                    model.model = model_data["prophet_model"]
-                    model.target_column = model_data.get("target_column")
-                    model.prophet_data = model_data.get("prophet_data")
-                    return model, "Prophet model loaded successfully"
-                except Exception as e:
-                    return None, f"Error loading Prophet model: {str(e)}"
-            
-            # Handle traditional ML models and enhanced models
-            if isinstance(model_data, dict) and "model_type" in model_data:
-                try:
-                    # Create model instance
-                    model_type = model_data["model_type"]
-                    
-                    # Check if it's an enhanced model
-                    if model_type in ["enhanced_isolation_forest", "ensemble_voting", "ensemble_stacking", "adaptive_threshold"]:
-                        try:
-                            # Try to load as enhanced model
-                            model = EnhancedAnomalyDetectionModel(model_type)
-                            
-                            # Load enhanced model attributes
-                            if "preprocessing_pipeline" in model_data:
-                                model.preprocessing_pipeline = model_data["preprocessing_pipeline"]
-                            if "ensemble_models" in model_data:
-                                model.ensemble_models = model_data["ensemble_models"]
-                            if "adaptive_thresholds" in model_data:
-                                model.adaptive_thresholds = model_data["adaptive_thresholds"]
-                            if "model_params" in model_data:
-                                model.model_params = model_data["model_params"]
-                                
-                        except NameError:
-                            # If EnhancedAnomalyDetectionModel is not available, fall back to regular model
-                            model = AnomalyDetectionModel(model_type)
-                    else:
-                        # Regular model
-                        model = AnomalyDetectionModel(model_type)
-                        model.resolved_model_type = model._runtime_model_type()
-                    
-                    # Load common attributes
-                    model.model = model_data.get("model")
-                    model.scaler = model_data.get("scaler")
-                    model.feature_columns = model_data.get("feature_columns")
-                    model.sequence_length = model_data.get("sequence_length", 10)
-                    model.reconstruction_error_threshold = model_data.get("reconstruction_error_threshold")
-                    model.metrics = model_data.get("metrics", {})
-                    
-                    # Additional attributes for enhanced models
-                    if hasattr(model, 'X_train'):
-                        model.X_train = model_data.get("X_train")
-                    
-                    return model, f"{model_type} model loaded successfully"
-                    
-                except Exception as e:
-                    logger.error(f"Error loading model attributes: {str(e)}")
-                    return None, f"Error loading model: {str(e)}"
-            
-            # Handle legacy format or corrupted files
-            else:
-                return None, f"Invalid model file format or corrupted file: {filepath}"
-                
-        except Exception as e:
-            logger.error(f"Model load error: {str(e)}")
-            return None, f"Error loading model: {str(e)}"
-    
-    def _create_sequences(self, data, seq_length):
-        """Create sequences for LSTM/GRU training"""
-        sequences = []
-        # Check if we have enough data points
-        if len(data) <= seq_length:
-            return np.array(sequences)
-            
-        # Create sequences
-        for i in range(len(data) - seq_length + 1):
-            sequences.append(data[i:i + seq_length])
-            
-        return np.array(sequences)
-
-# Visualization components
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         # Ensure minimum size to prevent negative dimensions
@@ -6646,7 +2558,7 @@ class LoginDialog(QDialog):
         self.role = None
         self.auth_provider = "local"
         
-        self.setWindowTitle("Login")
+        self.setWindowTitle("SDA v4.0 — Sign In")
         self.setFixedSize(500, 450)
         self.setStyleSheet("""
             QDialog {
@@ -6683,13 +2595,23 @@ class LoginDialog(QDialog):
         layout.setSpacing(8)  # Reduced spacing
         layout.setContentsMargins(20, 20, 20, 20)  # Reduced margins
         
-        # Logo
+        # Logo (bundled asset — do not depend on a Desktop path)
         logo_label = QLabel()
-        logo_pixmap = QPixmap("C:/Users/Elnur/Desktop/New folder (3)/logo-en.png")
+        logo_label.setAlignment(Qt.AlignCenter)
+        try:
+            from app.ui.login_dialog import load_azercosmos_logo
+
+            logo_pixmap = load_azercosmos_logo(width=400, height=100)
+        except Exception:
+            logo_path = Path(__file__).resolve().parent / "app" / "ui" / "assets" / "azercosmos-logo.png"
+            logo_pixmap = QPixmap(str(logo_path))
+            if not logo_pixmap.isNull():
+                logo_pixmap = logo_pixmap.scaled(400, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         if not logo_pixmap.isNull():
-            scaled_pixmap = logo_pixmap.scaled(400, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            logo_label.setPixmap(scaled_pixmap)
-            logo_label.setAlignment(Qt.AlignCenter)
+            logo_label.setPixmap(logo_pixmap)
+        else:
+            logo_label.setText("Azercosmos")
+            logo_label.setStyleSheet("font-size: 20px; font-weight: 700; color: #2f6fad;")
         layout.addWidget(logo_label)
         
         # Add some spacing
@@ -6941,7 +2863,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
             self.session_timeout_ms = 28800000  # Absolute session timeout: 8 hours
         
         # Initialize alert policy manager (dedup/cooldown/routing/escalation/audit)
-        policy_manager_cls = ModularAlertPolicyManager or AlertPolicyManager
+        policy_manager_cls = AlertPolicyManager
         self.alert_policy_manager = policy_manager_cls(
             db_path=TELEMETRY_DB_FILE,
             config_loader=load_alert_routing_config,
@@ -6993,20 +2915,34 @@ class SecureAnomalyDetectionTool(QMainWindow):
     
     def initUI(self):
         # Main window settings
-        self.setWindowTitle('Satellite Telemetry Data Monitoring System -STDMS-v2.0')
+        self.setWindowTitle('SDA v4.0')
         self.setGeometry(100, 100, 1200, 800)
         
         # Set minimum size to prevent figure resize issues
         self.setMinimumSize(800, 600)
         
-        # Create central widget with tab layout
+        # Create central widget: Spaceit-style dark nav + STDMS pages
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        from app.ui.sidebar import OpsNavSidebar
+
+        self.ops_nav = OpsNavSidebar()
+        self.ops_nav.set_user(self.current_username, self.current_role)
+        self.ops_nav.navigate.connect(self._on_ops_nav)
+        main_layout.addWidget(self.ops_nav)
         
-        # Create tabs
+        # Create tabs (tab bar hidden — navigation is the sidebar)
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(False)  # We'll handle closing custom tabs ourselves
+        self.tabs.tabBar().hide()
+        self.tabs.setDocumentMode(True)
+        self.tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; background: #f4f6f9; }"
+        )
         
         # Enable context menu for tabs (for delete option)
         self.tabs.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -7065,7 +3001,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
         # Setup the dashboard tab as default
         self.setup_dashboard_tab()
         
-        main_layout.addWidget(self.tabs)
+        main_layout.addWidget(self.tabs, 1)
         
         # Status bar setup
         self.status_bar = self.statusBar()
@@ -7105,14 +3041,19 @@ class SecureAnomalyDetectionTool(QMainWindow):
         else:
             self.health_monitor = None
         
-        # Add toolbar after tabs setup
+        # Sidebar replaces the old top toolbar (functions unchanged)
         self.setup_toolbar()
+        for bar in self.findChildren(QToolBar):
+            bar.setVisible(False)
         
         # Add "+" button for creating custom tabs (admin only)
         self.setup_custom_tabs_button()
         
         # Load existing custom tabs
         self.load_custom_tabs()
+        self._refresh_ops_nav()
+        if hasattr(self, "home_subtabs"):
+            self.home_subtabs.currentChanged.connect(self._on_home_subtab_changed)
 
         # Phase 0: local Instrumentation Agent bridge (read-only, localhost:8765)
         self._start_instrumentation_agent()
@@ -7491,6 +3432,10 @@ class SecureAnomalyDetectionTool(QMainWindow):
             self.agent_chat_send_btn.setEnabled(not busy)
         if hasattr(self, "agent_chat_input"):
             self.agent_chat_input.setEnabled(not busy)
+        if hasattr(self, "agent_chat_attach_btn"):
+            self.agent_chat_attach_btn.setEnabled(not busy)
+        if hasattr(self, "agent_chat_attach_clear_btn"):
+            self.agent_chat_attach_clear_btn.setEnabled(not busy)
         if hasattr(self, "agent_view_refresh_btn"):
             self.agent_view_refresh_btn.setEnabled(not busy)
         for name in (
@@ -7505,6 +3450,70 @@ class SecureAnomalyDetectionTool(QMainWindow):
             if w is not None:
                 w.setEnabled(not busy)
 
+    def _refresh_agent_attach_label(self):
+        paths = list(getattr(self, "_agent_chat_attachments", None) or [])
+        label = getattr(self, "agent_chat_attach_label", None)
+        clear_btn = getattr(self, "agent_chat_attach_clear_btn", None)
+        if label is None:
+            return
+        if not paths:
+            label.setText("")
+            if clear_btn is not None:
+                clear_btn.setVisible(False)
+            return
+        names = [os.path.basename(p) for p in paths]
+        label.setText("Attached: " + ", ".join(names))
+        if clear_btn is not None:
+            clear_btn.setVisible(True)
+
+    def _clear_agent_chat_attachments(self):
+        self._agent_chat_attachments = []
+        self._refresh_agent_attach_label()
+
+    def _attach_agent_chat_files(self):
+        """Open file picker and queue attachments for the next Ask."""
+        if getattr(self, "_agent_chat_busy", False):
+            return
+        from app.agent.chat_attachments import FILE_DIALOG_FILTER, MAX_ATTACHMENTS
+
+        existing = list(getattr(self, "_agent_chat_attachments", None) or [])
+        remaining = max(0, MAX_ATTACHMENTS - len(existing))
+        if remaining <= 0:
+            QMessageBox.information(
+                self,
+                "Attachments",
+                f"Maximum {MAX_ATTACHMENTS} files per message.",
+            )
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Attach files for the agent",
+            "",
+            FILE_DIALOG_FILTER,
+        )
+        if not paths:
+            return
+        seen = set(os.path.realpath(p) for p in existing)
+        added = 0
+        for path in paths:
+            if remaining <= 0:
+                break
+            real = os.path.realpath(path)
+            if real in seen:
+                continue
+            if not os.path.isfile(real):
+                continue
+            existing.append(real)
+            seen.add(real)
+            added += 1
+            remaining -= 1
+        self._agent_chat_attachments = existing
+        self._refresh_agent_attach_label()
+        if added:
+            self.statusBar().showMessage(
+                f"Attached {added} file(s) — click Ask to send with your question.", 4000
+            )
+
     def _on_agent_view_refreshed(self, payload: dict):
         """Update status from periodic monitor cycles (chat stays Ask-driven)."""
         if not hasattr(self, "agent_view_text"):
@@ -7516,7 +3525,11 @@ class SecureAnomalyDetectionTool(QMainWindow):
             if not mllm:
                 lines = payload.get("mllm_lines") or []
                 mllm = "\n".join(str(x) for x in lines if x)
-            self.mllm_summary_label.setText(mllm if mllm else "[M-LLM] Log analysis: —")
+            if hasattr(self, "_update_mllm_banner"):
+                self._update_mllm_banner(mllm)
+            else:
+                self.mllm_summary_label.setText(mllm if mllm else "")
+                self.mllm_summary_label.setVisible(bool(mllm))
         if hasattr(self, "refresh_draft_alerts_panel"):
             self.refresh_draft_alerts_panel()
         if hasattr(self, "refresh_retrain_signals_panel"):
@@ -7540,15 +3553,35 @@ class SecureAnomalyDetectionTool(QMainWindow):
             try:
                 from app.agent.ollama_client import resolve_chat_model
 
-                model = resolve_chat_model() or "qwen3:8b"
+                model = resolve_chat_model() or "qwen3.5:9b"
             except Exception:
-                model = "qwen3:8b"
+                model = "qwen3.5:9b"
         if online:
-            label.setText(f"online · {model}")
-            label.setStyleSheet("")
+            label.setText(f"  online · {model}  ")
+            label.setStyleSheet(
+                "QLabel { background: #dcfce7; color: #166534; border-radius: 10px; "
+                "padding: 3px 8px; font-size: 11px; font-weight: 600; }"
+            )
         else:
-            label.setText("offline · heuristic")
-            label.setStyleSheet("")
+            label.setText("  offline · local  ")
+            label.setStyleSheet(
+                "QLabel { background: #fee2e2; color: #991b1b; border-radius: 10px; "
+                "padding: 3px 8px; font-size: 11px; font-weight: 600; }"
+            )
+
+    def _update_mllm_banner(self, text: str):
+        label = getattr(self, "mllm_summary_label", None)
+        if label is None:
+            return
+        raw = (text or "").strip()
+        if raw.startswith("[M-LLM]"):
+            raw = raw[7:].strip()
+        if (not raw) or raw in ("Log analysis: —", "—"):
+            label.clear()
+            label.setVisible(False)
+            return
+        label.setText(raw)
+        label.setVisible(True)
 
     def _on_agent_chat_reply(self, payload: dict):
         reply = payload.get("reply") or ""
@@ -7556,6 +3589,8 @@ class SecureAnomalyDetectionTool(QMainWindow):
         mode_l = mode.lower()
         if mode_l in ("ra-llm", "rallm", "tool"):
             mode_label = "RA-LLM"
+        elif mode_l in ("chat", "chitchat", "greeting"):
+            mode_label = "Chat"
         elif mode_l in ("c-llm", "cllm", "knowledge"):
             mode_label = "C-LLM"
         elif mode_l in ("llm",) or payload.get("llm_used"):
@@ -7581,7 +3616,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
                 )
         # Refresh M-LLM strip when Ask carried a log summary
         if hasattr(self, "mllm_summary_label") and payload.get("log_summary"):
-            self.mllm_summary_label.setText(f"[M-LLM] {payload.get('log_summary')}")
+            self._update_mllm_banner(payload.get("log_summary"))
         self._replace_agent_thinking(mode_label, reply, tools=tools or None)
         self._set_agent_chat_busy(False)
         updated = datetime.datetime.now().strftime("%H:%M:%S")
@@ -7593,7 +3628,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
         if hasattr(self, "_refresh_agent_metric_cards"):
             self._refresh_agent_metric_cards()
 
-    def _ask_agent_async(self, msg: str):
+    def _ask_agent_async(self, msg: str, *, attachment_paths=None):
         """Append You turn + thinking..., then ask on a background thread."""
         loop = getattr(self, "agent_loop", None)
         if loop is None:
@@ -7601,24 +3636,46 @@ class SecureAnomalyDetectionTool(QMainWindow):
             return
         if getattr(self, "_agent_chat_busy", False):
             return
-        msg = (msg or "").strip()
-        if not msg:
+
+        from app.agent.chat_attachments import build_message_with_attachments
+
+        paths = list(attachment_paths or [])
+        built = build_message_with_attachments(msg, paths)
+        if not built.get("ok"):
+            errs = built.get("errors") or []
+            if errs:
+                detail = "; ".join(
+                    f"{e.get('filename')}: {e.get('error')}" for e in errs[:5]
+                )
+                QMessageBox.warning(
+                    self,
+                    "Attachments",
+                    f"Could not read attached file(s):\n{detail}",
+                )
             return
 
-        self._append_agent_chat("You", msg)
+        ask_msg = built["message"]
+        display = built.get("display") or (msg or "").strip() or ask_msg
+        if built.get("errors"):
+            failed = ", ".join(
+                f"{e.get('filename')} ({e.get('error')})" for e in built["errors"][:4]
+            )
+            self.statusBar().showMessage(f"Some attachments skipped: {failed}", 6000)
+
+        self._append_agent_chat("You", display)
         self._show_agent_thinking()
         self._set_agent_chat_busy(True)
         self._refresh_agent_llm_status()
 
         def _run():
             try:
-                loop.ask(msg)
+                loop.ask(ask_msg)
             except Exception as exc:
                 logger.warning("Agent chat failed: %s", exc)
                 loop.signals.chat_reply.emit(
                     {
                         "ok": False,
-                        "user_message": msg,
+                        "user_message": display,
                         "reply": f"Error: {exc}",
                         "llm_used": False,
                         "error": str(exc),
@@ -7628,12 +3685,16 @@ class SecureAnomalyDetectionTool(QMainWindow):
         threading.Thread(target=_run, name="stdms-agent-chat", daemon=True).start()
 
     def send_agent_chat(self):
-        """Send operator question to the agent (background)."""
+        """Send operator question (+ optional attached files) to the agent."""
         msg = ""
         if hasattr(self, "agent_chat_input"):
             msg = self.agent_chat_input.text().strip()
             self.agent_chat_input.clear()
-        self._ask_agent_async(msg)
+        paths = list(getattr(self, "_agent_chat_attachments", None) or [])
+        self._clear_agent_chat_attachments()
+        if not msg and not paths:
+            return
+        self._ask_agent_async(msg, attachment_paths=paths)
 
     def _refresh_agent_metric_cards(self):
         """No-op: metric cards were removed from the chat panel."""
@@ -7649,6 +3710,8 @@ class SecureAnomalyDetectionTool(QMainWindow):
             if hasattr(self, "home_subtabs"):
                 # AI Assistant is sub-tab 1 (Fleet Overview is 0)
                 self.home_subtabs.setCurrentIndex(1)
+            if hasattr(self, "_sync_ops_nav_active"):
+                self._sync_ops_nav_active()
         except Exception:
             pass
         if hasattr(self, "refresh_draft_alerts_panel"):
@@ -8601,6 +4664,8 @@ class SecureAnomalyDetectionTool(QMainWindow):
         self.tabs.setCurrentIndex(tab_index)
         if hasattr(self, "refresh_fleet_dashboard"):
             self.refresh_fleet_dashboard()
+        if hasattr(self, "_refresh_ops_nav"):
+            self._refresh_ops_nav()
         logger.info(
             "Created custom monitoring tab from approved draft: %s (ID: %s)",
             config.get("title"),
@@ -8699,25 +4764,26 @@ class SecureAnomalyDetectionTool(QMainWindow):
         toolbar.setMovable(False)
         toolbar.setStyleSheet("""
             QToolBar {
-            spacing: 6px;
-            padding: 5px 8px;
-            background-color: #f8f9fa;
-            border-bottom: 1px solid #dee2e6;
+            spacing: 8px;
+            padding: 8px 12px;
+            background-color: #0f172a;
+            border-bottom: 1px solid #1e293b;
             }
             QToolButton {
-            background-color: #ffffff;
-            color: #1a1d26;
-            border: 1px solid #d0d5dd;
+            background-color: transparent;
+            color: #e2e8f0;
+            border: 1px solid #334155;
             padding: 6px 14px;
-            border-radius: 4px;
+            border-radius: 6px;
             font-weight: 600;
             }
             QToolButton:hover {
-            background-color: #eef2ff;
-            border-color: #4f6ef7;
+            background-color: #1e293b;
+            border-color: #64748b;
+            color: #ffffff;
             }
             QToolButton:pressed {
-            background-color: #e0e7ff;
+            background-color: #334155;
             }
         """)
 
@@ -8768,32 +4834,84 @@ class SecureAnomalyDetectionTool(QMainWindow):
         idx = self.tabs.indexOf(self.dashboard_tab)
         if idx >= 0:
             self.tabs.setCurrentIndex(idx)
+        if hasattr(self, "home_subtabs"):
+            self.home_subtabs.setCurrentIndex(0)
+        self._sync_ops_nav_active()
+
+    def _show_ai_assistant(self):
+        self._show_home_tab()
+        if hasattr(self, "home_subtabs"):
+            self.home_subtabs.setCurrentIndex(1)
+        self._sync_ops_nav_active()
 
     def _show_administration_tab(self):
         if hasattr(self, "admin_tab"):
             idx = self.tabs.indexOf(self.admin_tab)
             if idx >= 0:
                 self.tabs.setCurrentIndex(idx)
+        self._sync_ops_nav_active()
+
+    def _on_ops_nav(self, key: str):
+        key = str(key or "")
+        if key == "home":
+            self._show_home_tab()
+        elif key == "admin":
+            self._show_administration_tab()
+        elif key == "new_tab":
+            self.add_custom_tab()
+        elif key.startswith("tab:"):
+            tab_id = key.split(":", 1)[-1]
+            widget = (getattr(self, "custom_tabs", None) or {}).get(tab_id)
+            if widget is not None:
+                idx = self.tabs.indexOf(widget)
+                if idx >= 0:
+                    self.tabs.setCurrentIndex(idx)
+            self._sync_ops_nav_active()
+
+    def _on_home_subtab_changed(self, index: int):
+        self._sync_ops_nav_active()
+
+    def _refresh_ops_nav(self):
+        nav = getattr(self, "ops_nav", None)
+        if nav is None:
+            return
+        nav.set_user(self.current_username, self.current_role)
+        can_create = self.service_layer.authorize(
+            self.current_username, "manage_users", resource="admin/users"
+        )
+        nav.set_can_create_tab(bool(can_create))
+        nav.set_admin_visible(hasattr(self, "admin_tab") and self.tabs.indexOf(self.admin_tab) >= 0)
+        rows = []
+        for tab_id, widget in (getattr(self, "custom_tabs", None) or {}).items():
+            title = (getattr(widget, "config", None) or {}).get("title") or tab_id
+            rows.append((tab_id, title))
+        nav.set_telemetry_tabs(rows)
+        self._sync_ops_nav_active()
+
+    def _sync_ops_nav_active(self):
+        nav = getattr(self, "ops_nav", None)
+        if nav is None or not hasattr(self, "tabs"):
+            return
+        current = self.tabs.currentWidget()
+        if current is getattr(self, "dashboard_tab", None):
+            sub = getattr(self, "home_subtabs", None)
+            key = "ai" if sub is not None and sub.currentIndex() == 1 else "home"
+        elif current is getattr(self, "admin_tab", None):
+            key = "admin"
+        else:
+            key = "home"
+            for tab_id, widget in (getattr(self, "custom_tabs", None) or {}).items():
+                if widget is current:
+                    key = f"tab:{tab_id}"
+                    break
+        nav.set_active(key)
 
     def _hide_primary_tab_bar_entries(self):
-        """Home and Administration are toolbar buttons — hide duplicate tab-bar tabs."""
-        bar = self.tabs.tabBar()
-        for widget, tip in (
-            (getattr(self, "dashboard_tab", None), "Home"),
-            (getattr(self, "admin_tab", None), "Administration"),
-        ):
-            if widget is None:
-                continue
-            idx = self.tabs.indexOf(widget)
-            if idx < 0:
-                continue
-            if hasattr(bar, "setTabVisible"):
-                bar.setTabVisible(idx, False)
-            else:
-                bar.setTabText(idx, "")
-                bar.setTabToolTip(idx, tip)
-        # Hiding Home can make Qt select Administration; always land on Home.
+        """Tab bar is hidden; keep Home selected after load."""
+        if hasattr(self, "tabs") and self.tabs.tabBar() is not None:
+            self.tabs.tabBar().hide()
         self._show_home_tab()
+        self._refresh_ops_nav()
     
     def setup_custom_tabs_button(self):
         """Placeholder - button is now added to toolbar in setup_toolbar()"""
@@ -8817,6 +4935,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
             self.custom_tabs[tab_id] = custom_tab
             self.tabs.setCurrentIndex(tab_index)
             self.refresh_fleet_dashboard()
+            self._refresh_ops_nav()
             
             logger.info(f"Created new custom monitoring tab: {config['title']} (ID: {tab_id})")
     
@@ -8896,6 +5015,8 @@ class SecureAnomalyDetectionTool(QMainWindow):
             self.tab_config_manager.remove_config(tab_id)
             
             logger.info(f"Removed custom tab: {tab_id}")
+            if hasattr(self, "_refresh_ops_nav"):
+                self._refresh_ops_nav()
             return True
         
         return False
@@ -9073,7 +5194,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
         agent_page_layout.setSpacing(10)
         agent_page_layout.setContentsMargins(10, 10, 10, 10)
 
-        agent_view_group = QGroupBox("Instrumentation Agent")
+        agent_view_group = QGroupBox("SatOps Agent")
         agent_view_outer = QVBoxLayout()
         agent_splitter = QSplitter(Qt.Horizontal)
         agent_splitter.setChildrenCollapsible(False)
@@ -9090,12 +5211,9 @@ class SecureAnomalyDetectionTool(QMainWindow):
 
         search_row = QHBoxLayout()
         self.agent_chat_search_input = QLineEdit()
-        self.agent_chat_search_input.setPlaceholderText("Search title here...")
+        self.agent_chat_search_input.setPlaceholderText("Search conversations…")
         self.agent_chat_search_input.textChanged.connect(self._filter_agent_sessions)
-        self.agent_chat_search_btn = QPushButton("Search Title")
-        self.agent_chat_search_btn.clicked.connect(self._filter_agent_sessions)
         search_row.addWidget(self.agent_chat_search_input, 1)
-        search_row.addWidget(self.agent_chat_search_btn)
         left_layout.addLayout(search_row)
 
         self.agent_chat_session_list = QListWidget()
@@ -9120,7 +5238,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
         agent_view_layout.setContentsMargins(4, 4, 4, 4)
         agent_view_layout.setSpacing(6)
         agent_header = QHBoxLayout()
-        self.agent_view_title_label = QLabel("Instrumentation Agent")
+        self.agent_view_title_label = QLabel("SatOps Agent")
         self.agent_view_title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         self.agent_llm_status_label = QLabel("checking…")
         self.agent_view_updated_label = QLabel("last update —")
@@ -9130,11 +5248,12 @@ class SecureAnomalyDetectionTool(QMainWindow):
         agent_header.addWidget(self.agent_view_updated_label)
         agent_view_layout.addLayout(agent_header)
 
-        self.mllm_summary_label = QLabel("[M-LLM] Log analysis: —")
+        self.mllm_summary_label = QLabel("")
         self.mllm_summary_label.setWordWrap(True)
+        self.mllm_summary_label.setVisible(False)
         self.mllm_summary_label.setStyleSheet(
-            "QLabel { color: #334155; background: #f1f5f9; padding: 8px 10px; "
-            "border-radius: 4px; font-size: 12px; }"
+            "QLabel { color: #334155; background: #eef2f7; padding: 8px 10px; "
+            "border-radius: 6px; font-size: 12px; }"
         )
         agent_view_layout.addWidget(self.mllm_summary_label)
 
@@ -9154,8 +5273,53 @@ class SecureAnomalyDetectionTool(QMainWindow):
         self._agent_thinking_line = None
         self._agent_chat_busy = False
 
+        self._agent_chat_attachments = []  # list[str] absolute paths
+
+        attach_bar = QHBoxLayout()
+        attach_bar.setSpacing(8)
+        self.agent_chat_attach_label = QLabel("")
+        self.agent_chat_attach_label.setWordWrap(True)
+        self.agent_chat_attach_label.setStyleSheet(
+            "QLabel { color: #455a64; font-size: 12px; padding: 2px 0; }"
+        )
+        self.agent_chat_attach_clear_btn = QPushButton("Clear files")
+        self.agent_chat_attach_clear_btn.setVisible(False)
+        self.agent_chat_attach_clear_btn.setStyleSheet(
+            "QPushButton {"
+            "  padding: 2px 8px; font-size: 11px; min-height: 22px; max-height: 24px;"
+            "  border: 1px solid #d0d5db; border-radius: 4px; background: #fafafa; color: #455a64;"
+            "}"
+            "QPushButton:hover { background: #f0f2f5; }"
+        )
+        self.agent_chat_attach_clear_btn.clicked.connect(self._clear_agent_chat_attachments)
+        attach_bar.addWidget(self.agent_chat_attach_label, 1)
+        attach_bar.addWidget(self.agent_chat_attach_clear_btn)
+        agent_view_layout.addLayout(attach_bar)
+
         chat_row = QHBoxLayout()
-        chat_row.setSpacing(10)
+        chat_row.setSpacing(8)
+        self.agent_chat_attach_btn = QPushButton("+")
+        self.agent_chat_attach_btn.setToolTip(
+            "Attach files for the agent to read (txt, md, csv, json, pdf, docx, …)"
+        )
+        self.agent_chat_attach_btn.setMinimumHeight(48)
+        self.agent_chat_attach_btn.setMinimumWidth(48)
+        self.agent_chat_attach_btn.setMaximumWidth(52)
+        self.agent_chat_attach_btn.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.agent_chat_attach_btn.setStyleSheet(
+            "QPushButton {"
+            "  padding: 6px;"
+            "  font-size: 20px;"
+            "  font-weight: 700;"
+            "  border: 1px solid #c8cdd3;"
+            "  border-radius: 6px;"
+            "  background: #f5f7f9;"
+            "  color: #1976d2;"
+            "}"
+            "QPushButton:hover { background: #e8eef4; }"
+            "QPushButton:disabled { color: #9e9e9e; }"
+        )
+        self.agent_chat_attach_btn.clicked.connect(self._attach_agent_chat_files)
         self.agent_chat_input = QLineEdit()
         self.agent_chat_input.setPlaceholderText("Ask about your fleet…")
         self.agent_chat_input.setMinimumHeight(48)
@@ -9187,6 +5351,7 @@ class SecureAnomalyDetectionTool(QMainWindow):
             "QPushButton:hover { background: #e8eef4; }"
         )
         self.agent_chat_send_btn.clicked.connect(self.send_agent_chat)
+        chat_row.addWidget(self.agent_chat_attach_btn)
         chat_row.addWidget(self.agent_chat_input, 1)
         chat_row.addWidget(self.agent_chat_send_btn)
         agent_view_layout.addLayout(chat_row)
@@ -9409,19 +5574,16 @@ class SecureAnomalyDetectionTool(QMainWindow):
         logout_button = QPushButton("Logout")
         logout_button.setStyleSheet("""
             QPushButton {
-                background-color: #f4cccc;
-                color: white;
+                background-color: #ffffff;
+                color: #b91c1c;
                 padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-size: 18px;
+                border: 1px solid #fecaca;
+                border-radius: 6px;
+                font-size: 13px;
                 min-width: 80px;
             }
             QPushButton:hover {
-                background-color: #c82333;
-            }
-            QPushButton:pressed {
-                background-color: #bd2130;
+                background-color: #fef2f2;
             }
         """)
         logout_button.clicked.connect(self.logout)
@@ -14591,7 +10753,7 @@ Alert sent to user: {username} ({user_data["role"]})
             
             test_recipient = config['smtp_username']  # Send to self
             subject = "Test Email from Monitoring System"
-            body = "This is a test email from the Satellite Telemetry Monitoring System.\n\nIf you received this, your email configuration is working correctly."
+            body = "This is a test email from SDA v4.0.\n\nIf you received this, your email configuration is working correctly."
             self._send_email_via_config(test_recipient, subject, body, config)
             
             self.email_status_label.setText(f"Test email sent successfully to {test_recipient}!")
@@ -15651,7 +11813,8 @@ Alert sent to user: {username} ({user_data["role"]})
         for i in range(self.model_list_widget.count()):
             item = self.model_list_widget.item(i)
             if item.checkState() == Qt.Checked:
-                selected.append(item.text())
+                stored = item.data(Qt.UserRole)
+                selected.append(catalog_display_name(stored or item.text()))
         return selected
     
     def open_parameter_dialog(self):
@@ -18934,6 +15097,8 @@ Alert sent to user: {username} ({user_data["role"]})
             # Log tab change
             tab_name = self.tabs.tabText(index)
             logger.info(f"User {self.current_username} switched to {tab_name} tab")
+            if hasattr(self, "_sync_ops_nav_active"):
+                self._sync_ops_nav_active()
             
             # Update status bar
             self.status_bar.showMessage(
@@ -19498,7 +15663,8 @@ class TabConfigurationDialog(QDialog):
             existing_model_names = [m.get("model_type") for m in self.existing_config.get("models", []) if m.get("model_type")]
 
         for model_name in available_models:
-            item = QListWidgetItem(model_name)
+            item = QListWidgetItem(format_model_catalog_label(model_name))
+            item.setData(Qt.UserRole, model_name)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             checked = bool(existing_model_names and model_name in existing_model_names)
             item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
@@ -19870,7 +16036,8 @@ class TabConfigurationDialog(QDialog):
         for i in range(self.model_multi_list.count()):
             item = self.model_multi_list.item(i)
             if item.checkState() == Qt.Checked:
-                names.append(item.text())
+                stored = item.data(Qt.UserRole)
+                names.append(catalog_display_name(stored or item.text()))
         return names
 
     def _select_all_initial_models(self):
@@ -20238,8 +16405,8 @@ if __name__ == '__main__':
         app = QApplication(sys.argv)
         
         # Set application name and organization for settings
-        app.setApplicationName("Telemetry monitoring Tool")
-        app.setOrganizationName("Security Analytics")
+        app.setApplicationName("SDA v4.0")
+        app.setOrganizationName("Azercosmos")
         
         # Initialize main window with exception handling
         try:

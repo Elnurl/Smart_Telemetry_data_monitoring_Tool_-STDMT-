@@ -20,16 +20,17 @@ from app.agent.policy import is_loopback_url
 logger = logging.getLogger("STDMS.Agent.Ollama")
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_OLLAMA_MODEL = "qwen3:8b"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:9b"
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 
-# Prefer these chat models when present (UI may show qwen2 if qwen3 missing)
+# Prefer these chat models when present. Stay in the 7–9B Q4 band (8GB laptop GPU).
 _CHAT_MODEL_PREFERENCE = (
+    "qwen3.5:9b",
     "qwen3:8b",
+    "qwen2.5:7b",
     "qwen2.5:8b",
     "qwen2:8b",
     "qwen3:4b",
-    "qwen2.5:7b",
     "qwen2:7b",
 )
 
@@ -77,6 +78,7 @@ def resolve_chat_model(
                 # prefer exact family
                 pass
     for cand in (want, *_CHAT_MODEL_PREFERENCE):
+
         for name in installed:
             if name == cand or name.startswith(cand):
                 return name

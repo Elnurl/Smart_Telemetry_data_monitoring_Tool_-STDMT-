@@ -11,22 +11,44 @@ from app.agent.nodes import (
     RLLMNode,
     heuristic_route,
 )
-from app.agent.prompts import CLLM_PROMPT, RALLM_PROMPT, RLLM_PROMPT
+from app.agent.prompts import CHAT_PROMPT, CLLM_PROMPT, RALLM_PROMPT, RLLM_PROMPT
 
 
 def test_prompt_constants_present():
     assert "tool" in RLLM_PROMPT.lower()
     assert "knowledge" in RLLM_PROMPT.lower()
+    assert "chat" in RLLM_PROMPT.lower()
+    assert "colleague" in CHAT_PROMPT.lower()
     assert "{log_summary}" in RALLM_PROMPT
     assert "{rag_context}" in CLLM_PROMPT
 
 
-def test_rllm_routing():
+def test_conversation_does_not_run_fleet_briefing():
+    """Unknown / social messages go to chat — no greeting word-list, no O/A/R."""
+    assert heuristic_route("salam") == "chat"
+    assert heuristic_route("hola") == "chat"
+    assert heuristic_route("Hello!") == "chat"
+    assert heuristic_route("start monitoring") == "tool"
+    pipe = MultiNodePipeline(allow_llm=False)
+    result = pipe.run("salam")
+    assert result.outcome == "chat"
+    assert result.route == "chat"
+    assert result.node == "chat"
+    assert "Observation" not in result.reply
+    assert "nominal" not in result.reply.lower()
+    hola = pipe.run("hola")
+    assert hola.route == "chat"
+    assert "Observation" not in hola.reply
+    who = pipe.run("who are you")
+    assert who.route == "chat"
+    assert "satops agent" in who.reply.lower()
+    assert "nominal" not in who.reply.lower()
     node = RLLMNode(allow_llm=False)
     assert node.route("create tab from data/x.csv") == "tool"
     assert node.route("what is the eclipse procedure?") == "knowledge"
     assert node.route("which tab needs attention?") == "tool"
-    assert heuristic_route("Why is Eclipse tab showing warnings?") == "knowledge"
+    assert heuristic_route("Why is Eclipse tab showing warnings?") == "tool"
+    assert heuristic_route("what is the eclipse procedure?") == "knowledge"
 
 
 def test_rallm_fsm_context():
@@ -83,6 +105,15 @@ def test_cllm_rag_only():
     assert CLLMNode.MISSING not in found
 
 
+def test_identity_uses_chat_not_rag():
+    pipe = MultiNodePipeline(allow_llm=False)
+    text = pipe.run("bu node nedir?").reply
+    assert "satops agent" in text.lower()
+    assert "eps" not in text.lower()
+    assert "tcs" not in text.lower()
+    assert "node-san" not in text.lower()
+
+
 def test_cllm_fsm_explains_eclipse_without_rag():
     node = CLLMNode(allow_llm=False)
     text = node.answer(
@@ -116,16 +147,17 @@ def test_pipeline_routes_create_tab_to_ra(monkeypatch):
     result = pipe.run("create tab from data/battery.csv", host=_Host())
     assert result.route == "tool"
     assert result.node == "RA-LLM"
-    assert "[R-LLM] routing → tool" in result.reply
+    assert "[R-LLM]" not in result.reply
 
 
-def test_pipeline_routes_why_eclipse_to_c(monkeypatch):
+def test_pipeline_routes_why_eclipse_tab_to_tools(monkeypatch):
     pipe = MultiNodePipeline(allow_llm=False)
     monkeypatch.setattr(pipe.cllm, "_retrieve", lambda *a, **k: [])
     result = pipe.run(
         "Why is Eclipse tab showing warnings?",
         host=None,
     )
-    assert result.route == "knowledge"
-    assert result.node == "C-LLM"
-    assert "[C-LLM]" in result.reply
+    assert result.route == "tool"
+    assert result.node == "RA-LLM"
+    assert "[C-LLM]" not in result.reply
+    assert "[R-LLM]" not in result.reply

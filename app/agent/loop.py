@@ -238,7 +238,7 @@ class AgentMonitorLoop:
             "tool_trace": tool_trace,
             "decision_id": decision_id,
             "outcome": outcome,
-            "phase": 3,
+            "phase": 4,
             "error": None,
         }
         self.signals.chat_reply.emit(payload)
@@ -319,7 +319,7 @@ class AgentMonitorLoop:
                     "pending_draft_count": cycle.get("pending_draft_count", 0),
                     "pending_retrain_count": cycle.get("pending_retrain_count", 0),
                     "ollama_up": ollama_reachable(self.ollama_url),
-                    "phase": 3,
+                    "phase": 4,
                     "outcome": cycle.get("outcome"),
                 }
                 mllm = self._run_mllm_log_pass(host)
@@ -370,7 +370,7 @@ class AgentMonitorLoop:
                         "tab_count": len(snapshots),
                         "llm_used": llm_used,
                         "interval": self._interval,
-                        "phase": 3,
+                        "phase": 4,
                         "tool_trace": tool_trace,
                     },
                     reasoning=summary[:8000],
@@ -389,7 +389,7 @@ class AgentMonitorLoop:
             "tool_trace": tool_trace,
             "tab_count": len(snapshots),
             "ollama_up": ollama_reachable(self.ollama_url),
-            "phase": 3,
+            "phase": 4,
         }
         mllm = self._run_mllm_log_pass(host)
         payload.update(mllm)
@@ -514,7 +514,7 @@ class AgentMonitorLoop:
     ) -> str:
         pending_retrain = pending_retrain or []
         lines = [
-            "STDMS Instrumentation Agent — fleet snapshot context (read-only).",
+            "STDMS SatOps Agent — fleet snapshot context (read-only).",
             f"Tabs: {len(snapshots)}; pending_retrain: {len(pending_retrain)}.",
         ]
         for snap in snapshots:
@@ -650,6 +650,6 @@ class AgentMonitorLoop:
 
         # Mark as heuristic so operators know this is not LLM reasoning
         lines.append(
-            "[Heuristic mode — install/start Ollama + qwen3:8b for real LLM analysis.]"
+            "[Heuristic mode — install/start Ollama + qwen3.5:9b for real LLM analysis.]"
         )
         return "\n".join(lines), lines

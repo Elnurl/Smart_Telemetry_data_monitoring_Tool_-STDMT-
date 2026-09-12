@@ -97,7 +97,7 @@ def main() -> int:
         audit=audit,
         tool_host_getter=lambda: host,
         allow_llm=True,
-        model="qwen3:8b",
+        model="qwen3.5:9b",
     )
 
     questions = [

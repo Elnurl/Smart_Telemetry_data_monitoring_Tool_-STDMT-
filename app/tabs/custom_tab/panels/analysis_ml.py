@@ -27,6 +27,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from app.models.model_types import format_model_catalog_label
 from app.tabs.custom_tab.panels.slots import LegacyPanelSlots
 
 
@@ -212,7 +213,8 @@ def build_analysis_ml_panel(host: Any, parent_layout, *, slots: LegacyPanelSlots
     h.available_models = slots.get_supported_model_names()
     
     for model_name in h.available_models:
-        item = QListWidgetItem(model_name)
+        item = QListWidgetItem(format_model_catalog_label(model_name))
+        item.setData(Qt.UserRole, model_name)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Unchecked)
         h.model_list_widget.addItem(item)

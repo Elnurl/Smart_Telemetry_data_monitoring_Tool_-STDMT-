@@ -10,6 +10,8 @@ keys/*
 !keys/.gitkeep
 data/users.json
 data/email_config.json
+data/bootstrap_admin_password.txt
+**/bootstrap_admin_password.txt
 data/telemetry.db
 data/model_registry.sqlite
 data/mission_fsm.sqlite
@@ -30,8 +32,10 @@ reports/auto/
 *.keras
 *.sqlite
 
-# Keep sample knowledge docs; ignore local archives of non-mission PDFs
+# Keep sample knowledge docs; ignore local archives and personal uploads
 data/knowledge/_archive/
+data/knowledge/*.pdf
+data/*.csv
 
 # Copilot / wrong uploads
 STDMS/

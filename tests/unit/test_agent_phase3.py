@@ -243,6 +243,6 @@ def test_run_agent_cycle_heuristic(tmp_path, host):
     runner = AgentRunner(audit=audit, tool_host_getter=lambda: host, allow_llm=False)
     out = runner.run_agent_cycle()
     assert out["ok"] is True
-    assert out["phase"] == 3
+    assert out["phase"] == 4
     assert out["llm_used"] is False
     assert "Observation" in out["summary"] or "heuristic" in out["summary"].lower()

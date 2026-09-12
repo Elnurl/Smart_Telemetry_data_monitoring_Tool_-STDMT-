@@ -1,4 +1,4 @@
-"""Instrumentation Agent — Phase 0–3 tool chain, propose drafts, RAG stub."""
+"""Instrumentation Agent — Phase 0–4 tool chain, propose drafts, dual RAG, ToolHost API."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from app.agent.nodes import (
     heuristic_route,
 )
 from app.agent.prompts import (
+    CHAT_PROMPT,
     CLLM_PROMPT,
     MLLM_PROMPT,
     RALLM_PROMPT,
@@ -42,6 +43,7 @@ __all__ = [
     "AgentRunner",
     "CLLMNode",
     "CLLM_PROMPT",
+    "CHAT_PROMPT",
     "LogAnalysis",
     "LogEvent",
     "LogMonitor",

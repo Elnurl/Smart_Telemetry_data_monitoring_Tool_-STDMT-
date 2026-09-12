@@ -20,6 +20,17 @@ from app.agent.ollama_client import (
 )
 from app.agent.policy import is_loopback_url
 from app.agent.prompts import SYSTEM_PROMPT, build_system_prompt
+from app.agent.ops_intent import (
+    OpsIntent,
+    classify_ops_intent,
+    fulfill_intent,
+    is_create_tab_intent as _ops_create_tab,
+    is_write_sop_intent,
+    LIVE_INTENTS,
+    needs_fulfillment,
+    operator_query,
+    sanitize_tool_args,
+)
 from app.agent.tools import (
     invoke_tool,
     list_tools,
@@ -113,6 +124,8 @@ _WRITE_DOC_HINTS = (
 
 
 def _is_write_document_intent(user_message: str) -> bool:
+    if is_write_sop_intent(user_message):
+        return True
     m = (user_message or "").lower().strip()
     if not m:
         return False
@@ -128,7 +141,9 @@ def _is_write_document_intent(user_message: str) -> bool:
 
 def _is_create_tab_intent(user_message: str) -> bool:
     """True when operator asks to create a monitoring tab (path optional)."""
-    m = (user_message or "").lower().strip()
+    if _ops_create_tab(user_message):
+        return True
+    m = operator_query(user_message).lower().strip()
     if not m:
         return False
     if _is_write_document_intent(m):
@@ -148,20 +163,20 @@ def _is_create_tab_intent(user_message: str) -> bool:
 
 
 def _is_best_model_intent(user_message: str) -> bool:
-    m = (user_message or "").lower().strip()
-    if not m:
+    q = operator_query(user_message)
+    if not q:
         return False
+    if classify_ops_intent(q) == OpsIntent.COMPARE_MODELS:
+        return True
+    m = q.lower()
     if "model" not in m:
         return False
     return any(
         w in m
         for w in (
             "best",
-            "which",
             "recommend",
             "compare",
-            "hansı",
-            "hansi",
             "ən yaxşı",
             "en yaxsi",
         )
@@ -169,18 +184,31 @@ def _is_best_model_intent(user_message: str) -> bool:
 
 
 def _is_informational_ask(user_message: str) -> bool:
-    """True for read-only questions (which tab / status) — not create/write/train."""
-    m = (user_message or "").lower().strip()
-    if not m:
+    """True for read-only live questions — not create/write/train."""
+    q = operator_query(user_message)
+    if not q:
         return False
-    if _is_write_document_intent(m) or _is_create_tab_intent(m):
+    if _is_write_document_intent(q) or _is_create_tab_intent(q):
         return False
-    if _is_best_model_intent(m):
-        return True  # still informational (compare), but handled separately
+    intent = classify_ops_intent(q)
+    if intent in (
+        OpsIntent.WRITE_SOP,
+        OpsIntent.CREATE_TAB,
+        OpsIntent.MUTATE,
+        OpsIntent.CHAT,
+        OpsIntent.KNOWLEDGE,
+    ):
+        return False
+    if intent in LIVE_INTENTS:
+        return True
+    if _is_best_model_intent(q):
+        return True
+    # Fallback: older fleet phrasing
+    m = q.lower()
     if any(h in m for h in _FLEET_HINTS):
         return True
     return any(h in m for h in _INFO_ASK_HINTS) and (
-        "tab" in m or "fleet" in m or "monitor" in m or "eclipse" in m
+        "tab" in m or "fleet" in m or "monitor" in m
     )
 
 
@@ -209,8 +237,10 @@ def _tab_lines_from_host(host: Any) -> list[dict[str, Any]]:
 
 def synthesize_fleet_answer(user_message: str, host: Any) -> str:
     """Build a direct factual answer from live tabs (no Approve / draft nag)."""
+    from app.agent.ops_intent import resolve_tab
+
     rows = _tab_lines_from_host(host)
-    msg = (user_message or "").lower()
+    msg = operator_query(user_message)
     if not rows:
         return (
             "[Observation] No monitoring tabs are currently open.\n"
@@ -218,38 +248,38 @@ def synthesize_fleet_answer(user_message: str, host: Any) -> str:
             "[Recommendation] Open or create a monitoring tab if you need one."
         )
 
-    # Prefer title keyword matches from the question
-    tokens = [
-        w
-        for w in re.findall(r"[a-z0-9]+", msg)
-        if len(w) >= 4 and w not in {"which", "what", "that", "want", "know", "from", "with", "this", "tab", "tabs", "monitor", "created", "operation"}
-    ]
+    resolved = resolve_tab(msg, host)
     matched = []
+    if resolved:
+        for row in rows:
+            if str(row.get("tab_id")) == resolved.tab_id or row["title"].lower() == resolved.title.lower():
+                matched.append(row)
+    # Also match any open title that appears as a whole token (including short names like test)
+    msg_l = msg.lower()
+    tokens = set(re.findall(r"[a-z0-9]+", msg_l))
     for row in rows:
         title_l = row["title"].lower()
-        if any(tok in title_l for tok in tokens) or (
-            "eclipse" in msg and "eclipse" in title_l
-        ):
-            matched.append(row)
+        title_tok = re.findall(r"[a-z0-9]+", title_l)
+        if title_l and (title_l in msg_l or any(t in tokens for t in title_tok if t not in {"tab", "monitoring"})):
+            if row not in matched:
+                matched.append(row)
 
-    focus = matched or rows
+    # Fleet-list questions must show every open tab (do not hide `test`)
+    intent = classify_ops_intent(msg, host=host)
+    if intent == OpsIntent.FLEET or not matched:
+        focus = rows
+        obs = f"Open monitoring tabs ({len(rows)}):"
+        analysis = "Live list from the desktop host — every open tab is included."
+    else:
+        focus = matched
+        obs = f"Matching tab(s) for your question ({len(matched)}):"
+        analysis = "Matched by the tab title you named, not by mission mode."
+
     lines = []
     for r in focus:
         mon = "active" if r["monitoring"] else "idle"
         lines.append(
             f"- {r['title']} (health={r['health']}, monitoring={mon}, trained_models={r['trained']})"
-        )
-
-    if matched:
-        obs = f"Matching tab(s) for your question ({len(matched)}):"
-        analysis = (
-            "These titles best match the keywords in your question "
-            f"({', '.join(tokens[:6]) or 'eclipse/monitor'})."
-        )
-    else:
-        obs = f"Open monitoring tabs ({len(rows)}):"
-        analysis = (
-            "No strong title match for the keywords; listing all open tabs so you can pick."
         )
 
     return (
@@ -652,12 +682,18 @@ def _deterministic_best_model(user_message: str, host: Any) -> Optional[dict[str
 
 
 def _should_prefetch_knowledge(user_message: str) -> bool:
-    m = (user_message or "").lower().strip()
-    if not m:
+    q = operator_query(user_message)
+    if not q:
         return False
-    # Creating/updating SOPs must go to propose_write_sop — don't drown the model in RAG.
-    if _is_write_document_intent(m):
+    # Live ops and SOP writes must not be drowned in RAG.
+    if _is_write_document_intent(q):
         return False
+    intent = classify_ops_intent(q)
+    if intent in LIVE_INTENTS:
+        return False
+    if intent == OpsIntent.KNOWLEDGE:
+        return True
+    m = q.lower()
     if any(h in m for h in _FLEET_HINTS) and not any(
         h in m for h in ("sop", "procedure", "how to", "how do i")
     ):
@@ -701,9 +737,11 @@ def run_function_calling(
     chat_fn: Optional[Callable[..., Optional[dict[str, Any]]]] = None,
     generate_fn: Optional[Callable[..., Optional[str]]] = None,
     reachable_fn: Optional[Callable[..., bool]] = None,
+    extra_context: str = "",
 ) -> dict[str, Any]:
     """Run a tool-augmented LLM turn. Returns reply + tool_trace + llm_used."""
     user_message = (user_message or "").strip()
+    op_query = operator_query(user_message)
     chat_fn = chat_fn or chat_ollama
     generate_fn = generate_fn or call_ollama
     reachable_fn = reachable_fn or ollama_reachable
@@ -728,24 +766,61 @@ def run_function_calling(
             "outcome": "error: tool_host_not_attached",
         }
 
-    create_intent = _is_create_tab_intent(user_message)
-    best_model_intent = _is_best_model_intent(user_message)
-    info_ask = _is_informational_ask(user_message) and not create_intent and not _is_write_document_intent(
-        user_message
+    intent = classify_ops_intent(op_query, host=host)
+    create_intent = intent == OpsIntent.CREATE_TAB or _is_create_tab_intent(op_query)
+    best_model_intent = intent == OpsIntent.COMPARE_MODELS or _is_best_model_intent(op_query)
+    write_intent_early = intent == OpsIntent.WRITE_SOP or _is_write_document_intent(op_query)
+    actionish = any(
+        w in op_query.lower()
+        for w in (
+            "investigate",
+            "propose",
+            "escalate",
+            "create alert",
+            "propose_alert",
+            "retrain now",
+            "start monitoring",
+            "stop monitoring",
+        )
+    )
+    info_ask = (
+        not actionish
+        and (
+            (
+                intent in LIVE_INTENTS
+                and intent not in (OpsIntent.CREATE_TAB, OpsIntent.WRITE_SOP, OpsIntent.MUTATE)
+            )
+            or (
+                _is_informational_ask(op_query)
+                and not create_intent
+                and not write_intent_early
+            )
+        )
     )
     ollama_up = is_loopback_url(ollama_url) and bool(reachable_fn(ollama_url))
 
-    # Read-only fleet / "which tab" questions: answer from live tabs (no draft spam)
-    if info_ask and not best_model_intent:
+    def _maybe_fulfill(reply: Optional[str], trace: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+        if needs_fulfillment(intent, trace, reply):
+            filled = fulfill_intent(op_query, host, intent=intent)
+            if filled.get("reply"):
+                merged = list(trace) + [
+                    t for t in (filled.get("tool_trace") or []) if t.get("tool") not in {x.get("tool") for x in trace}
+                ]
+                filled["tool_trace"] = merged
+                filled["llm_used"] = bool(extra.get("llm_used"))
+                return filled
+        out = {
+            "ok": True,
+            "reply": reply,
+            "tool_trace": trace,
+            **extra,
+        }
+        return out
+
+    # Read-only live questions: if Ollama is down, still run the real tools
+    if info_ask and not best_model_intent and not create_intent:
         if not ollama_up:
-            return {
-                "ok": True,
-                "reply": synthesize_fleet_answer(user_message, host),
-                "llm_used": False,
-                "tool_trace": [{"tool": "get_fleet_status", "ok": True, "deterministic": True}],
-                "outcome": "function_calling",
-                "agent_mode": "tools",
-            }
+            return fulfill_intent(op_query, host, intent=intent)
 
     # Create-tab: always build the draft from real inspect→suggest (ideal name/features/models).
     # If Ollama is up, still ask LLM to narrate — but the draft is already data-driven.
@@ -943,15 +1018,19 @@ def run_function_calling(
         )
     elif info_ask:
         write_hint = (
-            "\n\n[Operator intent: INFORMATION ONLY]\n"
-            "Call get_fleet_status (or get_all_snapshots). Answer which tab matches "
-            "(e.g. eclipse → Eclipse monitoring). Do NOT call propose_* tools. "
+            "\n\n[Operator intent: LIVE INFORMATION]\n"
+            f"Situation class: {intent.value}. Call the matching tools NOW "
+            "(get_fleet_status / get_tab_detail / get_tab_history / list_tab_models / "
+            "check_pending_retrain_signals / inspect_data_folder / forecast_risk / explain_anomaly).\n"
+            "Use the tab title the operator named. Never pass mission_mode (eclipse/imaging) as tab_id.\n"
+            "Do NOT say you will call a tool later. Do NOT call propose_* tools. "
             "Do NOT tell the operator to Approve drafts."
         )
 
+    user_payload = op_query + (f"\n\n{extra_context}" if extra_context else "") + knowledge_block + write_hint
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": prompt},
-        {"role": "user", "content": user_message + knowledge_block + write_hint},
+        {"role": "user", "content": user_payload},
     ]
 
     once_ran: set[str] = set()
@@ -975,15 +1054,7 @@ def run_function_calling(
                     det["agent_mode"] = "tools"
                     return det
             if info_ask:
-                return {
-                    "ok": True,
-                    "reply": synthesize_fleet_answer(user_message, host),
-                    "llm_used": False,
-                    "tool_trace": tool_trace
-                    or [{"tool": "get_fleet_status", "ok": True, "deterministic": True}],
-                    "outcome": "function_calling",
-                    "agent_mode": "tools",
-                }
+                return fulfill_intent(op_query, host, intent=intent)
             plain = generate_fn(
                 prompt + "\n\nOperator question:\n" + user_message,
                 base_url=ollama_url,
@@ -1008,9 +1079,15 @@ def run_function_calling(
                     # best_model may already have answered in content after tools in prior rounds
                     pass
                 break
-            # Informational: prefer model content; else synthesize from fleet
-            if info_ask and not content:
-                content = synthesize_fleet_answer(user_message, host)
+            # Informational: if the model skipped tools or only promised them, run them
+            if info_ask and (not content or needs_fulfillment(intent, tool_trace, content)):
+                return _maybe_fulfill(
+                    content,
+                    tool_trace,
+                    llm_used=True,
+                    outcome="function_calling" if tool_trace else "llm_direct",
+                    agent_mode="llm",
+                )
             return {
                 "ok": True,
                 "reply": content or None,
@@ -1044,6 +1121,8 @@ def run_function_calling(
                 messages.append(tool_msg)
                 continue
             try:
+                args = sanitize_tool_args(name, args, message=op_query, host=host)
+                entry["params"] = args
                 result = invoke_tool(name, args, host=host)
                 payload = tool_result_json(result)
                 entry["ok"] = True
@@ -1194,18 +1273,17 @@ def run_function_calling(
         )
     if not (reply or "").strip():
         reply = _reply_after_tools(
-            user_message=user_message,
+            user_message=op_query,
             host=host,
             tool_trace=tool_trace,
             write_intent=write_intent,
-        ) or synthesize_fleet_answer(user_message, host)
+        ) or synthesize_fleet_answer(op_query, host)
 
-    return {
-        "ok": True,
-        "reply": reply,
-        "llm_used": bool(reply),
-        "tool_trace": tool_trace,
-        "outcome": "function_calling",
-        "agent_mode": "llm",
-        "tools_available": [t["name"] for t in list_tools(include_mutating=include_mutating)],
-    }
+    return _maybe_fulfill(
+        reply,
+        tool_trace,
+        llm_used=bool(reply),
+        outcome="function_calling",
+        agent_mode="llm",
+        tools_available=[t["name"] for t in list_tools(include_mutating=include_mutating)],
+    )

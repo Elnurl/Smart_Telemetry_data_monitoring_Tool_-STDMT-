@@ -27,7 +27,8 @@ class UserManager:
         "train_models": {"*": ["admin", "analyst"], "model:production": ["admin"]},
         "manage_users": {"*": ["admin"]},
         "configure_system": {"*": ["admin"]},
-        "create_tab": {"*": ["admin", "analyst"]},
+        "ack_alert": {"*": ["admin", "analyst"], "alert:*": ["admin", "analyst"]},
+        "create_tab": {"*": ["admin", "analyst"], "tab:*": ["admin", "analyst"]},
         "delete_tab": {"tab:*": ["admin"], "*": ["admin"]},
     }
 
@@ -66,7 +67,7 @@ class UserManager:
         self.save_users()
         bootstrap_file = self.user_db_file.parent / "bootstrap_admin_password.txt"
         bootstrap_file.write_text(
-            "STDMS - Initial Admin Credentials\n"
+            "SDA v4.0 - Initial Admin Credentials\n"
             "---------------------------------\n"
             f"Reason: {reason}\n"
             "Username: admin\n"
@@ -133,6 +134,10 @@ class UserManager:
             user["failed_attempts"] = 0
             self.save_users()
             return 0
+
+    def _authenticate_local(self, username: str, password: str) -> tuple[bool, str | None, str, bool]:
+        """Local username/password check used by LocalAuthProvider and ToolHost login."""
+        return self.authenticate(username, password)
 
     def authenticate(self, username: str, password: str) -> tuple[bool, str | None, str, bool]:
         """Returns success, role, message, password_change_required."""

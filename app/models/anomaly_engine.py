@@ -127,15 +127,23 @@ class AnomalyModel:
                 )
                 self.model.fit(X)
             elif backend == "random_forest":
-                iso = IsolationForest(contamination=self.contamination, random_state=42)
-                pseudo = iso.fit_predict(X)
-                y = np.where(pseudo == -1, 1, 0)
+                rng = np.random.default_rng(42)
+                n_synth = max(8, int(len(X) * max(self.contamination, 0.05)))
+                mean = np.mean(X, axis=0)
+                std = np.where(np.std(X, axis=0) < 1e-8, 1.0, np.std(X, axis=0))
+                signs = rng.choice(np.array([-1.0, 1.0]), size=(n_synth, X.shape[1]))
+                synth = mean + signs * (8.0 + rng.random((n_synth, X.shape[1])) * 4.0) * std
+                X_aug = np.vstack([X, synth])
+                y = np.concatenate([np.zeros(len(X), dtype=int), np.ones(n_synth, dtype=int)])
                 self.model = RandomForestClassifier(
                     n_estimators=int(self.params.get("n_estimators", 200)),
                     random_state=42,
                     class_weight="balanced_subsample",
                 )
-                self.model.fit(X, y)
+                self.model.fit(X_aug, y)
+                train_proba = self.model.predict_proba(X)
+                train_scores = train_proba[:, 1] if train_proba.shape[1] > 1 else train_proba[:, 0]
+                self.score_threshold = float(max(0.5, np.percentile(train_scores, (1 - self.contamination) * 100)))
             else:
                 return False, f"Unsupported backend: {backend}"
 
@@ -191,9 +199,13 @@ class AnomalyModel:
                 return -scores, anomalies
             if backend == "random_forest":
                 proba = self.model.predict_proba(X)
-                scores = proba[:, 1] if proba.shape[1] > 1 else proba[:, 0]
-                threshold = np.percentile(scores, (1 - self.contamination) * 100)
-                return scores, scores > threshold
+                clf = proba[:, 1] if proba.shape[1] > 1 else proba[:, 0]
+                distance = np.max(np.abs(X), axis=1)
+                scores = np.maximum(clf, np.clip(distance / 6.0, 0.0, 1.0))
+                threshold = getattr(self, "score_threshold", None)
+                if threshold is None:
+                    threshold = np.percentile(scores, (1 - self.contamination) * 100)
+                return scores, (scores > threshold) | (distance > 3.5)
             return None, None
         except Exception as exc:
             logger.warning("Prediction failed for %s: %s", self.model_type, exc)
@@ -244,6 +256,7 @@ class AnomalyModel:
             "z_stats": self.z_stats,
             "z_threshold": self.z_threshold,
             "contamination": self.contamination,
+            "score_threshold": getattr(self, "score_threshold", None),
             "trained": self.trained,
         }
 
@@ -259,5 +272,6 @@ class AnomalyModel:
         obj.z_stats = state.get("z_stats", {})
         obj.z_threshold = state.get("z_threshold", 3.0)
         obj.contamination = state.get("contamination", 0.1)
+        obj.score_threshold = state.get("score_threshold")
         obj.trained = state.get("trained", False)
         return obj

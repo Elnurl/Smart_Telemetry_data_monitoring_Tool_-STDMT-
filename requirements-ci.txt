@@ -2,4 +2,7 @@ pytest
 pandas
 PyQt5
 pip-audit
-
+fastapi
+uvicorn
+PyJWT
+networkx

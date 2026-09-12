@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.ui.qt_compat import (
+    AlignCenter,
     QDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPixmap,
     QPushButton,
     QVBoxLayout,
+    Qt,
     exec_dialog,
 )
+
+AZERCOSMOS_LOGO = Path(__file__).resolve().parent / "assets" / "azercosmos-logo.png"
+
+
+def load_azercosmos_logo(*, width: int = 360, height: int = 90) -> QPixmap:
+    pix = QPixmap(str(AZERCOSMOS_LOGO))
+    if pix.isNull():
+        return pix
+    return pix.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
 
 class LoginDialog(QDialog):
@@ -23,14 +37,25 @@ class LoginDialog(QDialog):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("STDMS — Sign In")
+        self.setWindowTitle("SDA v4.0 — Sign In")
         self.setMinimumWidth(420)
 
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
 
-        header = QLabel("Satellite Telemetry Data Monitoring System")
+        logo = QLabel()
+        logo.setAlignment(AlignCenter)
+        pix = load_azercosmos_logo()
+        if not pix.isNull():
+            logo.setPixmap(pix)
+        else:
+            logo.setText("Azercosmos")
+            logo.setStyleSheet("font-size: 18px; font-weight: 700; color: #2f6fad;")
+        layout.addWidget(logo)
+
+        header = QLabel("SDA v4.0")
         header.setWordWrap(True)
+        header.setAlignment(AlignCenter)
         header.setStyleSheet("font-size: 16px; font-weight: 700;")
         layout.addWidget(header)
 

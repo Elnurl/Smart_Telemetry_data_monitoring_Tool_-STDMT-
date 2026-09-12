@@ -1,4 +1,4 @@
-# STDMS v3.1 — Satellite Telemetry Data Monitoring Tool
+# SDA v4.0
 
 PyQt desktop app: custom monitoring tabs, anomaly detection, fleet dashboard.
 
@@ -11,8 +11,9 @@ MIT License — see [LICENSE](LICENSE).
 Local loopback API + Dashboard Agent Assistant with tool chains + RAG.
 
 - Binds only to `127.0.0.1`
-- Phase 0–3: snapshots, monitor loop, chat, function calling, propose_* + Approve/Reject
-- Phase 4 RAG: put PDF/MD under `data/knowledge/`, then:
+- Phase 0–4: snapshots, monitor loop, chat, function calling, propose_* + Approve/Reject, dual RAG, graph memory
+- Preferred HTTP API: JWT `/v1/*` (see `/health` → `preferred_api`). Legacy `/tabs` and `/agent/*` remain for the desktop shell.
+- RAG: put PDF/MD under `data/knowledge/`, then:
   ```powershell
   ollama pull nomic-embed-text
   py -3.10 -m app.agent.rag.ingest
@@ -44,6 +45,8 @@ Do **not** use `python main.py` if default is Python 3.14.
 py -3.10 -m pip install -r requirements.txt
 copy data\email_config.example.json data\email_config.json
 ```
+
+Do not commit `data/email_config.json` or `data/bootstrap_admin_password.txt` (gitignored). SMTP credentials stay plaintext locally.
 
 ## Tests
 
